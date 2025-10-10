@@ -3,7 +3,7 @@
 import numpy as np
 from scipy import signal
 from typing import Tuple
-from .enums import ModulationType
+from .objects.enums import ModulationType
 
 
 def rrc_filter_time(symbol_rate: float, rolloff: float, span: int, samples_per_symbol: int) -> np.ndarray:

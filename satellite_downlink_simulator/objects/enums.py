@@ -16,6 +16,7 @@ class ModulationType(Enum):
     QAM16 = "16QAM"
     APSK16 = "16APSK"
     APSK32 = "32APSK"
+    STATIC_CW = "STATIC_CW"  # Unmodulated continuous wave (carrier only)
 
 
 class CarrierStandard(Enum):

@@ -5,7 +5,7 @@ import numpy as np
 from typing import List, Optional, Tuple
 from .carrier import Carrier
 from .enums import ModulationType, CarrierType
-from .utils import validate_positive
+from ..utils import validate_positive
 
 
 @attrs.define

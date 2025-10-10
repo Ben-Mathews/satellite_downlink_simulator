@@ -3,7 +3,7 @@
 import attrs
 from typing import Optional
 from .enums import CarrierType, ModulationType, CarrierStandard
-from .utils import validate_positive, validate_range
+from ..utils import validate_positive, validate_range
 
 
 @attrs.define
@@ -17,14 +17,16 @@ class Carrier:
         Carrier center frequency offset from transponder center in Hz
     cn_db : float
         Carrier-to-noise ratio (C/N) in dB relative to transponder noise floor
-    symbol_rate_sps : float
-        Symbol rate in symbols/second (Baud)
+    symbol_rate_sps : float, optional
+        Symbol rate in symbols/second (Baud). Required for modulated carriers,
+        ignored for STATIC_CW.
     modulation : ModulationType
-        Modulation type
+        Modulation type (BPSK, QPSK, etc., or STATIC_CW for unmodulated carrier)
     carrier_type : CarrierType
         Carrier type (FDMA or TDMA)
     rrc_rolloff : float, optional
-        Root-raised-cosine rolloff factor (0 to 1), default 0.35
+        Root-raised-cosine rolloff factor (0 to 1), default 0.35.
+        Ignored for STATIC_CW.
     standard : CarrierStandard, optional
         Communication standard, default NONE
     burst_time_s : float, optional
@@ -37,9 +39,9 @@ class Carrier:
 
     frequency_offset_hz: float = attrs.field()
     cn_db: float = attrs.field()
-    symbol_rate_sps: float = attrs.field()
     modulation: ModulationType = attrs.field()
     carrier_type: CarrierType = attrs.field()
+    symbol_rate_sps: Optional[float] = attrs.field(default=None)
     rrc_rolloff: float = attrs.field(default=0.35)
     standard: CarrierStandard = attrs.field(default=CarrierStandard.NONE)
     burst_time_s: Optional[float] = attrs.field(default=None)
@@ -57,7 +59,8 @@ class Carrier:
 
     @symbol_rate_sps.validator
     def _validate_symbol_rate_sps(self, attribute, value):
-        validate_positive(value, "symbol_rate_sps")
+        if value is not None:
+            validate_positive(value, "symbol_rate_sps")
 
     @rrc_rolloff.validator
     def _validate_rrc_rolloff(self, attribute, value):
@@ -75,6 +78,19 @@ class Carrier:
 
     def __attrs_post_init__(self):
         """Post-initialization validation."""
+        # STATIC_CW carriers must NOT have symbol_rate_sps
+        if self.modulation == ModulationType.STATIC_CW:
+            if self.symbol_rate_sps is not None:
+                raise ValueError(
+                    "STATIC_CW carriers should not specify symbol_rate_sps (it is ignored)"
+                )
+        else:
+            # Modulated carriers MUST have symbol_rate_sps
+            if self.symbol_rate_sps is None:
+                raise ValueError(
+                    f"Modulated carriers ({self.modulation.value}) must specify symbol_rate_sps"
+                )
+
         # TDMA carriers must have burst_time_s and duty_cycle
         if self.carrier_type == CarrierType.TDMA:
             if self.burst_time_s is None or self.duty_cycle is None:
@@ -94,11 +110,16 @@ class Carrier:
         """
         Calculate occupied bandwidth in Hz.
 
+        For STATIC_CW carriers, returns a small fixed bandwidth (100 Hz).
+        For modulated carriers, returns bandwidth based on symbol rate and RRC rolloff.
+
         Returns
         -------
         float
-            Occupied bandwidth based on symbol rate and RRC rolloff
+            Occupied bandwidth in Hz
         """
+        if self.modulation == ModulationType.STATIC_CW:
+            return 100.0  # Fixed small bandwidth for unmodulated CW
         return self.symbol_rate_sps * (1 + self.rrc_rolloff)
 
     @property
@@ -183,6 +204,14 @@ class Carrier:
         type_str = f"{self.carrier_type.value}"
         if self.carrier_type == CarrierType.TDMA:
             type_str += f" (DC={self.duty_cycle:.2f})"
+
+        # For STATIC_CW, don't show symbol rate
+        if self.modulation == ModulationType.STATIC_CW:
+            return (
+                f"{name}{type_str} {self.modulation.value} @ "
+                f"{self.frequency_offset_hz / 1e6:+.3f} MHz, "
+                f"C/N={self.cn_db:.1f} dB"
+            )
 
         return (
             f"{name}{type_str} {self.modulation.value} @ "

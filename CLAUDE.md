@@ -88,6 +88,78 @@ The `populate_with_random_carriers()` method implements a sophisticated algorith
 
 **Edge Margin**: Default is 20% (line 225), meaning carriers must stay 20% of transponder bandwidth away from edges. This was changed from 10% to reduce overlap failures.
 
+### 4. STATIC_CW Carrier Type for Unmodulated Tones
+
+**Location**: `satellite_downlink_simulator/objects/enums.py` and `objects/carrier.py`
+
+**What**: STATIC_CW is a special modulation type representing unmodulated continuous wave (CW) carriers - pure sinusoidal tones used for testing, beacons, or calibration.
+
+**Key Characteristics**:
+- **No symbol rate**: `symbol_rate_sps` must be `None` (validation enforced)
+- **Fixed bandwidth**: Returns 100 Hz (representing oscillator phase noise width)
+- **Gaussian PSD shape**: Rendered as narrow Gaussian peak instead of RRC-shaped spectrum
+- **Power specification**: Still uses C/N like other carriers
+
+**Implementation** (carrier.py):
+```python
+if self.modulation == ModulationType.STATIC_CW:
+    if self.symbol_rate_sps is not None:
+        raise ValueError("STATIC_CW carriers should not specify symbol_rate_sps")
+    return 100.0  # Fixed bandwidth in Hz
+```
+
+**PSD Generation** (simulation/psd.py):
+```python
+if carrier.modulation == ModulationType.STATIC_CW:
+    # Generate narrow Gaussian peak (100 Hz FWHM)
+    sigma_hz = 100.0 / (2 * np.sqrt(2 * np.log(2)))
+    carrier_shape = np.exp(-0.5 * (freq_rel_to_carrier / sigma_hz) ** 2)
+    # Normalize so integral equals carrier power
+    normalization = sigma_hz * np.sqrt(2 * np.pi)
+    carrier_psd = power_watts / normalization * carrier_shape
+```
+
+**Usage Example**:
+```python
+cw_carrier = Carrier(
+    name="Beacon",
+    frequency_offset_hz=5e6,
+    cn_db=20.0,
+    modulation=ModulationType.STATIC_CW,
+    carrier_type=CarrierType.FDMA,
+    # No symbol_rate_sps or rrc_rolloff needed
+)
+```
+
+**Why**: Satellite systems commonly use CW tones for frequency references, signal presence indication, and network synchronization. This carrier type allows realistic simulation of these signals.
+
+### 5. Configurable Sample Rate with Nyquist Validation
+
+**Location**: `satellite_downlink_simulator/generation.py` lines 220-229
+
+**Design**: The `generate_iq()` function accepts an optional `sample_rate_hz` parameter that allows users to override the default 1.25× bandwidth oversampling.
+
+**Why**: Different applications require different oversampling factors:
+- **Standard use**: 1.25× provides adequate headroom (default)
+- **High-fidelity analysis**: 2× or higher for better frequency domain resolution
+- **Efficient storage**: Minimal oversampling when file size matters
+- **Hardware testing**: Match specific ADC/DAC sample rates
+
+**Validation**:
+```python
+# generation.py lines 224-229
+if sample_rate_hz < bandwidth_hz:
+    raise ValueError(
+        f"sample_rate_hz must be >= bandwidth to satisfy Nyquist criterion. "
+        f"Minimum required: {bandwidth_hz:.2f} Hz, got: {sample_rate_hz:.2f} Hz"
+    )
+```
+
+**Trade-offs**:
+- Lower sample rates (closer to bandwidth): Smaller files, faster processing, but less frequency headroom
+- Higher sample rates: Better spectral clarity, easier filtering, but larger files and slower processing
+- Validation prevents aliasing by enforcing the Nyquist criterion
+
 ## Important Implementation Details
 
 ### Power Spectral Density (PSD) Generation
@@ -118,7 +190,8 @@ carrier_psd = power_watts / carrier.symbol_rate_sps * (carrier_shape ** 2)
 **Real Time-Domain Approach**: Generates actual modulated symbols with pulse shaping.
 
 **Key Points**:
-- Sample rate = 1.25 × bandwidth (line 217)
+- Sample rate = 1.25 × bandwidth (default, configurable via `sample_rate_hz` parameter)
+- Sample rate validation ensures Nyquist criterion is met (sample_rate >= bandwidth)
 - Each carrier gets actual constellation symbols (line 327-329)
 - RRC pulse shaping applied in time domain (lines 336-344)
 - TDMA bursting applied via masking (lines 361-367, 372-408)
@@ -161,15 +234,23 @@ This is used in PSD generation to show average power level (what you'd see on a 
 ## File Structure and Responsibilities
 
 ```
-satellite_spectrum_emulator/
-├── carrier.py          # Carrier class - individual signals
-├── transponder.py      # Transponder class - contains carriers
-├── beam.py             # Beam class - contains transponders
-├── generation.py       # PSD and IQ generation functions
-├── utils.py            # Signal processing (RRC filters, constellations)
-├── metadata.py         # PSDMetadata and IQMetadata classes
-└── enums.py            # All enumerations (Band, Modulation, etc.)
+satellite_downlink_simulator/
+├── objects/                    # Object definitions
+│   ├── __init__.py            # Exports all objects
+│   ├── carrier.py             # Carrier class - individual signals
+│   ├── transponder.py         # Transponder class - contains carriers
+│   ├── beam.py                # Beam class - contains transponders
+│   ├── metadata.py            # PSDMetadata and IQMetadata classes
+│   └── enums.py               # All enumerations (Band, Modulation, etc.)
+├── simulation/                 # Signal generation functions
+│   ├── __init__.py            # Exports generation functions
+│   ├── psd.py                 # PSD generation (frequency domain)
+│   └── iq.py                  # IQ generation (time domain)
+├── utils.py                    # Signal processing utilities (RRC, constellations, validation)
+└── __init__.py                 # Top-level exports (backward compatible)
 ```
+
+**Note**: The top-level `__init__.py` re-exports all classes and functions for backward compatibility. Old code using imports like `from satellite_downlink_simulator.carrier import Carrier` will continue to work.
 
 ### Key Classes
 
@@ -263,6 +344,27 @@ Generates 5 PNG plots demonstrating all features.
    - Reduced to 6 transponders (user modification)
    - Skips IQ generation for large beams (only generates PSD)
 
+5. **Configurable Sample Rate for IQ Generation**:
+   - From: Hard-coded sample rate at 1.25× bandwidth
+   - To: Optional `sample_rate_hz` parameter with validation
+   - Default: Still 1.25× bandwidth when not specified
+   - Validation: Enforces Nyquist criterion (sample_rate >= bandwidth)
+   - Reason: Allows users to control oversampling factor for specific use cases while maintaining safe defaults
+
+6. **STATIC_CW Modulation Type**:
+   - Added: STATIC_CW to ModulationType enum for unmodulated carriers
+   - Carrier changes: Made `symbol_rate_sps` optional; STATIC_CW must NOT have it
+   - Bandwidth: STATIC_CW returns fixed 100 Hz (phase noise width)
+   - PSD rendering: Gaussian peak instead of RRC-shaped spectrum
+   - Reason: Enable simulation of beacon tones, frequency references, and calibration signals
+
+7. **Code Restructuring into objects/ and simulation/ subdirectories**:
+   - Reorganized: Split flat structure into logical subdirectories
+   - objects/: carrier.py, transponder.py, beam.py, metadata.py, enums.py
+   - simulation/: psd.py (was part of generation.py), iq.py (was part of generation.py)
+   - Backward compatibility: Top-level __init__.py re-exports everything
+   - Reason: Better code organization, clearer separation of concerns, easier to navigate
+
 ## Potential Gotchas
 
 ### 1. Transponder Noise Density Required for Carrier Power
@@ -285,9 +387,39 @@ By default, transponders reject overlapping carriers. Set `allow_overlap=True` i
 
 TDMA carriers MUST have `burst_time_s` and `duty_cycle`. FDMA carriers MUST NOT have these parameters. Validation will raise `ValueError` if this is violated.
 
-### 5. Sample Rate Auto-Calculation
+### 5. Sample Rate Configuration
 
-IQ generation automatically sets sample rate to 1.25× bandwidth. You cannot override this. If you need a different sample rate, you'll need to modify `generation.py` line 217.
+**Default Behavior**: IQ generation automatically sets sample rate to 1.25× bandwidth if not specified.
+
+**Override**: You can specify a custom `sample_rate_hz` parameter in `generate_iq()`, but it MUST be >= bandwidth_hz to satisfy the Nyquist criterion. The function will raise a `ValueError` with a descriptive message if this validation fails.
+
+**Example**:
+```python
+# Use default 1.25× bandwidth
+iq_data, metadata = generate_iq(transponder, duration_s=0.01)
+
+# Use custom sample rate (2× bandwidth for extra headroom)
+iq_data, metadata = generate_iq(transponder, duration_s=0.01, sample_rate_hz=2.0 * transponder.bandwidth_hz)
+
+# This will raise ValueError (violates Nyquist criterion)
+iq_data, metadata = generate_iq(transponder, duration_s=0.01, sample_rate_hz=0.5 * transponder.bandwidth_hz)
+```
+
+### 6. STATIC_CW Parameter Requirements
+
+**STATIC_CW carriers have different parameter requirements than modulated carriers:**
+
+**MUST NOT specify**:
+- `symbol_rate_sps` - will raise ValueError if provided
+- `rrc_rolloff` - ignored (can be left at default, but has no effect)
+
+**MUST specify**:
+- `modulation=ModulationType.STATIC_CW`
+- `cn_db` - power level relative to noise
+- `carrier_type` - FDMA or TDMA
+- `frequency_offset_hz` - position within transponder
+
+**Modulated carriers (BPSK, QPSK, etc.) MUST specify `symbol_rate_sps`**, otherwise validation will raise ValueError.
 
 ## Useful Utilities
 
@@ -421,6 +553,9 @@ vbw_hz = rbw_hz / 10  # 10:1 ratio for smooth traces
 
 # IQ Generation
 duration_s = 0.001 to 0.01  # 1-10 ms (sufficient for most analysis)
+sample_rate_hz = None  # Use default 1.25× bandwidth, or specify custom rate
+# For high-fidelity: sample_rate_hz = 2.0 * bandwidth_hz
+# For hardware matching: sample_rate_hz = <your_adc_sample_rate>
 ```
 
 ## Contact and Maintenance
