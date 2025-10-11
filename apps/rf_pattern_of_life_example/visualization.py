@@ -299,22 +299,29 @@ class Visualizer:
         return selected
 
     def create_animated_spectrogram(self, fps: int = 15, figsize: Tuple[float, float] = (19.2, 10.8),
-                                   frame_decimation: int = 1):
-        """Create animated GIF showing PSD evolution over time.
+                                   frame_decimation: int = 1, output_format: str = 'gif'):
+        """Create animated GIF or MP4 showing PSD evolution over time.
 
-        Creates an animated GIF with:
+        Creates an animated visualization with:
         - Top 1/3: Current PSD line plot
         - Bottom 2/3: Spectrogram with white line marking current time
 
         Args:
-            fps: Frames per second for the GIF (default: 15)
+            fps: Frames per second (default: 15)
             figsize: Figure size in inches (width, height). Default (19.2, 10.8) = 1920x1080 at 100 DPI
             frame_decimation: Frame decimation factor. Use every Nth frame (default: 1, no decimation)
+            output_format: Output format, either 'gif' or 'mp4' (default: 'gif')
         """
-        print(f"\nCreating animated spectrogram GIF...")
+        # Validate output format
+        output_format = output_format.lower()
+        if output_format not in ['gif', 'mp4']:
+            raise ValueError(f"output_format must be 'gif' or 'mp4', got '{output_format}'")
+
+        print(f"\nCreating animated spectrogram ({output_format.upper()})...")
         print(f"  Frame rate: {fps} fps")
         print(f"  Figure size: {figsize[0]:.1f}x{figsize[1]:.1f} inches")
         print(f"  Frame decimation: {frame_decimation}")
+        print(f"  Output format: {output_format}")
 
         # Calculate frame indices with decimation
         frame_indices = list(range(0, len(self.time_array), frame_decimation))
@@ -323,7 +330,7 @@ class Visualizer:
         try:
             import imageio
         except ImportError:
-            print("  ERROR: imageio not installed. Install with: pip install imageio")
+            print("  ERROR: imageio not installed. Install with: pip install 'imageio[ffmpeg]'")
             return
 
         # Use non-interactive backend for rendering
@@ -393,10 +400,15 @@ class Visualizer:
             # Restore original backend
             matplotlib.use(original_backend)
 
-        # Save as GIF
-        output_file = os.path.join(self.output_dir, 'animated_spectrogram.gif')
-        print(f"  Saving GIF...")
-        imageio.mimsave(output_file, frames, fps=fps)
+        # Save file
+        output_file = os.path.join(self.output_dir, f'animated_spectrogram.{output_format}')
+        print(f"  Saving {output_format.upper()}...")
+
+        if output_format == 'gif':
+            imageio.mimsave(output_file, frames, fps=fps)
+        elif output_format == 'mp4':
+            # MP4 requires additional codec parameters
+            imageio.mimsave(output_file, frames, fps=fps, codec='libx264', quality=8, pixelformat='yuv420p')
 
         file_size_mb = os.path.getsize(output_file) / (1024 * 1024)
         print(f"  Saved to {output_file}")

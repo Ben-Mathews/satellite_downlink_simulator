@@ -34,7 +34,7 @@ setup(
         "scipy>=1.7.0",
         "attrs>=21.0.0",
         "matplotlib>=3.3.0",
-        "imageio>=2.9.0",
+        "imageio[ffmpeg]>=2.9.0",
     ],
     extras_require={
         "dev": [
