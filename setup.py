@@ -40,6 +40,8 @@ setup(
         "dev": [
             "pytest>=6.0.0",
             "pytest-cov>=2.0.0",
+            "pytest-html>=4.0.0",
+            "pytest-metadata>=3.0.0",
             "black>=21.0",
             "flake8>=3.9.0",
         ],
