@@ -409,6 +409,7 @@ class Visualizer:
         self.create_average_spectrum()
         self.create_snapshot_comparison()
         self.create_activity_timeline(activity_log)
+        self.create_animated_spectrogram()
 
         print(f"\n{'='*60}")
         print(f"All visualizations complete!")
