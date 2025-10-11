@@ -115,15 +115,16 @@ def generate_psd(
             power_watts = carrier.calculate_average_power_watts(transponder.noise_power_density_watts_per_hz)
 
             if carrier.modulation == ModulationType.STATIC_CW:
-                # STATIC_CW: Generate narrow Gaussian peak
-                # Use fixed bandwidth of 100 Hz (matching carrier.bandwidth_hz)
-                sigma_hz = 100.0 / (2 * np.sqrt(2 * np.log(2)))  # Convert FWHM to sigma
-                carrier_shape = np.exp(-0.5 * (freq_rel_to_carrier / sigma_hz) ** 2)
+                # STATIC_CW: Render as impulse (delta function) concentrated in nearest bin
+                # Find the nearest frequency bin to the carrier
+                nearest_idx = np.argmin(np.abs(freq_rel_to_carrier))
 
-                # Normalize Gaussian so integral equals 1
-                # For Gaussian: integral = sigma * sqrt(2*pi)
-                normalization = sigma_hz * np.sqrt(2 * np.pi)
-                carrier_psd = power_watts / normalization * carrier_shape
+                # Create impulse: concentrate all power as PSD in one bin
+                # The power_watts is already in Watts, convert to W/Hz for this bin
+                # Since this is an impulse, the PSD value represents all the power
+                carrier_psd = np.zeros_like(freq_rel_to_carrier)
+                # Use the actual carrier bandwidth (100 Hz) to calculate PSD
+                carrier_psd[nearest_idx] = power_watts / carrier.bandwidth_hz
             else:
                 # Modulated carrier: Use RRC filter response
                 carrier_shape = rrc_filter_freq(
