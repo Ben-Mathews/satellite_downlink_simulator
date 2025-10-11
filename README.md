@@ -16,6 +16,8 @@ The library is built around three primary objects that represent the physical ar
 
 These objects can be composed hierarchically (Beam → Transponders → Carriers) to model realistic satellite communication systems at any level of complexity.
 
+<img src="doc/images/example_waterfall_plot.png" alt="24 Hour Spectrogram" width="800"/>
+
 ### Signal Generation Capabilities
 
 Two complementary signal generation functions operate on these objects:
