@@ -684,6 +684,18 @@ The `create_animated_spectrogram()` method generates animated visualizations sho
 - Usage: `viz.create_animated_spectrogram(output_format='mp4')` or `output_format='gif'`
 - MP4 encoding parameters: `codec='libx264'`, `quality=8` (high quality), `pixelformat='yuv420p'` (standard compatibility)
 
+## Git Workflow
+
+**IMPORTANT**: Do NOT commit to git without explicit user approval.
+
+When working on this codebase, Claude should:
+- Make code changes as requested
+- Run tests and verify functionality
+- **STOP before committing** - wait for explicit user instruction to commit
+- Only run `git commit` and `git push` when the user explicitly says to do so
+
+This allows the user to review changes and decide when commits should be made.
+
 ## Contact and Maintenance
 
 This library was developed iteratively with the following key objectives:
