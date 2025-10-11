@@ -40,16 +40,47 @@ Both functions accept Beam or Transponder objects and produce physically accurat
 
 ## Installation
 
+### Standard Installation
+
 ```bash
 pip install -e .
 ```
 
+This installs the core library with essential dependencies (numpy, scipy, attrs, matplotlib, imageio).
+
+### Development Installation
+
+To install with development tools (testing, code formatting, linting):
+
+```bash
+pip install -e ".[dev]"
+```
+
+This adds:
+- `pytest` - Test framework
+- `pytest-cov` - Code coverage
+- `pytest-html` - HTML test reports with embedded plots
+- `pytest-metadata` - Test environment metadata
+- `black` - Code formatter
+- `flake8` - Code linter
+
 ### Requirements
 
+**Core Dependencies:**
 - Python 3.8+
-- numpy
-- matplotlib
-- attrs
+- numpy >= 1.20.0
+- scipy >= 1.7.0
+- attrs >= 21.0.0
+- matplotlib >= 3.3.0
+- imageio[ffmpeg] >= 2.9.0
+
+**Development Dependencies (optional):**
+- pytest >= 6.0.0
+- pytest-cov >= 2.0.0
+- pytest-html >= 4.0.0
+- pytest-metadata >= 3.0.0
+- black >= 21.0
+- flake8 >= 3.9.0
 
 ## Quick Start
 
@@ -606,9 +637,24 @@ satellite_downlink_simulator/
 
 ## Dependencies
 
-- `numpy >= 1.20.0`: Numerical computations
-- `attrs >= 21.0.0`: Class definitions
-- `matplotlib >= 3.3.0`: Plotting (for examples)
+### Core Dependencies
+
+- `numpy >= 1.20.0`: Numerical computations and array operations
+- `scipy >= 1.7.0`: Signal processing (Welch's method, FFT operations)
+- `attrs >= 21.0.0`: Class definitions with validation
+- `matplotlib >= 3.3.0`: Plotting and visualization
+- `imageio[ffmpeg] >= 2.9.0`: Animated visualization export (GIF and MP4)
+
+### Development Dependencies
+
+Install with `pip install -e ".[dev]"` to get these additional tools:
+
+- `pytest >= 6.0.0`: Test framework
+- `pytest-cov >= 2.0.0`: Code coverage reporting
+- `pytest-html >= 4.0.0`: HTML test reports with embedded plots
+- `pytest-metadata >= 3.0.0`: Test environment metadata
+- `black >= 21.0`: Code formatter
+- `flake8 >= 3.9.0`: Code linter
 
 ## License
 
