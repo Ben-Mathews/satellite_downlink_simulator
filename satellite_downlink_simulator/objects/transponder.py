@@ -300,7 +300,10 @@ class Transponder:
         float
             Total carrier power in Watts
         """
-        return sum(carrier.average_power_watts for carrier in self.carriers)
+        return sum(
+            carrier.calculate_average_power_watts(self.noise_power_density_watts_per_hz)
+            for carrier in self.carriers
+        )
 
     @property
     def total_noise_power_watts(self) -> float:
