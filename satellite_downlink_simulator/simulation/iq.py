@@ -89,35 +89,33 @@ def generate_iq(
     # Process each transponder
     for transponder in transponders:
         # Add transponder noise with RRC shaping
-        # Generate white noise
-        noise_i = np.random.normal(0, 1, num_samples)
-        noise_q = np.random.normal(0, 1, num_samples)
+        # Goal: Match the noise floor from generate_psd() where PSD = N0 * |H_RRC(f)|²
+        #
+        # Solution: Apply RRC frequency response directly in frequency domain
+        # This ensures the spectral shape matches exactly
+        #
+        # Step 1: Generate white noise with PSD = N0 across the sample rate
+        noise_power = transponder.noise_power_density_watts_per_hz * sample_rate_hz
+        noise_std = np.sqrt(noise_power / 2)
+        noise_i = np.random.normal(0, noise_std, num_samples)
+        noise_q = np.random.normal(0, noise_std, num_samples)
         noise = noise_i + 1j * noise_q
 
-        # Shape noise with RRC filter to match transponder bandwidth
-        # Calculate samples per symbol for noise shaping
-        # Use a representative symbol rate (e.g., 1/10 of bandwidth)
-        noise_symbol_rate_sps = transponder.bandwidth_hz / 10
-        noise_sps = int(sample_rate_hz / noise_symbol_rate_sps)
-        if noise_sps < 2:
-            noise_sps = 2
+        # Step 2: Apply RRC shaping in frequency domain
+        # Take FFT of noise
+        noise_fft = np.fft.fft(noise)
+        freqs_fft = np.fft.fftfreq(num_samples, 1/sample_rate_hz)
 
-        rrc_taps = rrc_filter_time(
-            noise_symbol_rate_sps,
-            transponder.noise_rolloff,
-            span=10,
-            samples_per_symbol=noise_sps
-        )
+        # Get RRC frequency response
+        # Use transponder bandwidth as symbol rate to match generate_psd()
+        from ..utils import rrc_filter_freq
+        rrc_response = rrc_filter_freq(freqs_fft, transponder.bandwidth_hz, transponder.noise_rolloff)
 
-        # Filter noise
-        noise_shaped = np.convolve(noise, rrc_taps, mode='same')
+        # Apply RRC shape (multiply in frequency domain)
+        noise_fft_shaped = noise_fft * rrc_response
 
-        # Scale to match transponder noise power density
-        # Power = N0 * BW, where N0 is noise power density (W/Hz)
-        target_noise_power_watts = transponder.noise_power_density_watts_per_hz * transponder.bandwidth_hz
-        current_noise_power = np.mean(np.abs(noise_shaped) ** 2)
-        if current_noise_power > 0:
-            noise_shaped *= np.sqrt(target_noise_power_watts / current_noise_power)
+        # Step 3: Convert back to time domain
+        noise_shaped = np.fft.ifft(noise_fft_shaped)
 
         # Frequency shift to transponder center
         freq_offset_hz = transponder.center_frequency_hz - center_freq_hz
