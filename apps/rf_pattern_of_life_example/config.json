@@ -1,0 +1,379 @@
+{
+  "transponders": [
+    {
+      "index": 0,
+      "center_frequency_hz": 12218000000.0,
+      "bandwidth_hz": 36000000.0,
+      "noise_power_density_watts_per_hz": 1e-15,
+      "noise_rolloff": 0.25
+    },
+    {
+      "index": 1,
+      "center_frequency_hz": 12254000000.0,
+      "bandwidth_hz": 36000000.0,
+      "noise_power_density_watts_per_hz": 1e-15,
+      "noise_rolloff": 0.25
+    },
+    {
+      "index": 2,
+      "center_frequency_hz": 12290000000.0,
+      "bandwidth_hz": 36000000.0,
+      "noise_power_density_watts_per_hz": 1e-15,
+      "noise_rolloff": 0.25
+    },
+    {
+      "index": 3,
+      "center_frequency_hz": 12326000000.0,
+      "bandwidth_hz": 36000000.0,
+      "noise_power_density_watts_per_hz": 1e-15,
+      "noise_rolloff": 0.25
+    },
+    {
+      "index": 4,
+      "center_frequency_hz": 12362000000.0,
+      "bandwidth_hz": 36000000.0,
+      "noise_power_density_watts_per_hz": 1e-15,
+      "noise_rolloff": 0.25
+    },
+    {
+      "index": 5,
+      "center_frequency_hz": 12398000000.0,
+      "bandwidth_hz": 36000000.0,
+      "noise_power_density_watts_per_hz": 1e-15,
+      "noise_rolloff": 0.25
+    }
+  ],
+  "carriers": [
+    {
+      "name": "Static_0_0",
+      "transponder_idx": 0,
+      "frequency_offset_hz": -7100273.100260777,
+      "cn_db": 12.3,
+      "symbol_rate_sps": 6800000.0,
+      "modulation": "QAM16",
+      "rrc_rolloff": 0.2,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_0_1",
+      "transponder_idx": 0,
+      "frequency_offset_hz": 11021119.055150606,
+      "cn_db": 10.3,
+      "symbol_rate_sps": 4500000.0,
+      "modulation": "QAM16",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_0_2",
+      "transponder_idx": 0,
+      "frequency_offset_hz": 2759007.386908643,
+      "cn_db": 19.3,
+      "symbol_rate_sps": 7100000.0,
+      "modulation": "QAM16",
+      "rrc_rolloff": 0.2,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_0_3",
+      "transponder_idx": 0,
+      "frequency_offset_hz": -13576547.81872917,
+      "cn_db": 16.0,
+      "symbol_rate_sps": 1100000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_1_0",
+      "transponder_idx": 1,
+      "frequency_offset_hz": 10355617.806764636,
+      "cn_db": 17.8,
+      "symbol_rate_sps": 4700000.0,
+      "modulation": "APSK16",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_1_1",
+      "transponder_idx": 1,
+      "frequency_offset_hz": -2970718.4395419895,
+      "cn_db": 24.5,
+      "symbol_rate_sps": 12500000.0,
+      "modulation": "QAM16",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_1_2",
+      "transponder_idx": 1,
+      "frequency_offset_hz": -12666429.2409754,
+      "cn_db": 10.2,
+      "symbol_rate_sps": 2200000.0,
+      "modulation": "QAM16",
+      "rrc_rolloff": 0.2,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_2_0",
+      "transponder_idx": 2,
+      "frequency_offset_hz": -720328.0651764646,
+      "cn_db": 23.3,
+      "symbol_rate_sps": 2300000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_2_1",
+      "transponder_idx": 2,
+      "frequency_offset_hz": -6229813.629077572,
+      "cn_db": 18.4,
+      "symbol_rate_sps": 3900000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.2,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_2_2",
+      "transponder_idx": 2,
+      "frequency_offset_hz": 7280341.268047003,
+      "cn_db": 16.6,
+      "symbol_rate_sps": 10200000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_2_5",
+      "transponder_idx": 2,
+      "frequency_offset_hz": -10973945.564522708,
+      "cn_db": 22.1,
+      "symbol_rate_sps": 1600000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_2_7",
+      "transponder_idx": 2,
+      "frequency_offset_hz": -13278360.15434788,
+      "cn_db": 23.6,
+      "symbol_rate_sps": 1500000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_3_0",
+      "transponder_idx": 3,
+      "frequency_offset_hz": -4480329.560352177,
+      "cn_db": 24.4,
+      "symbol_rate_sps": 8600000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_3_1",
+      "transponder_idx": 3,
+      "frequency_offset_hz": 9508673.695743117,
+      "cn_db": 14.0,
+      "symbol_rate_sps": 8000000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.2,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_3_3",
+      "transponder_idx": 3,
+      "frequency_offset_hz": -11998249.290040938,
+      "cn_db": 20.1,
+      "symbol_rate_sps": 3000000.0,
+      "modulation": "APSK16",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_3_6",
+      "transponder_idx": 3,
+      "frequency_offset_hz": 3264934.8293874804,
+      "cn_db": 13.3,
+      "symbol_rate_sps": 1200000.0,
+      "modulation": "QAM16",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_4_0",
+      "transponder_idx": 4,
+      "frequency_offset_hz": 3398107.134241335,
+      "cn_db": 21.7,
+      "symbol_rate_sps": 3900000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_4_1",
+      "transponder_idx": 4,
+      "frequency_offset_hz": -12044278.580461616,
+      "cn_db": 10.1,
+      "symbol_rate_sps": 1600000.0,
+      "modulation": "APSK16",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_4_2",
+      "transponder_idx": 4,
+      "frequency_offset_hz": -5332201.903735429,
+      "cn_db": 17.3,
+      "symbol_rate_sps": 5100000.0,
+      "modulation": "APSK16",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_4_3",
+      "transponder_idx": 4,
+      "frequency_offset_hz": 9987921.762086077,
+      "cn_db": 17.4,
+      "symbol_rate_sps": 6800000.0,
+      "modulation": "QAM16",
+      "rrc_rolloff": 0.2,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_4_12",
+      "transponder_idx": 4,
+      "frequency_offset_hz": -382558.30476090946,
+      "cn_db": 18.4,
+      "symbol_rate_sps": 2100000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_5_0",
+      "transponder_idx": 5,
+      "frequency_offset_hz": -7596026.858433161,
+      "cn_db": 24.9,
+      "symbol_rate_sps": 5700000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_5_1",
+      "transponder_idx": 5,
+      "frequency_offset_hz": 5657597.30039719,
+      "cn_db": 12.0,
+      "symbol_rate_sps": 13800000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.2,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Static_5_5",
+      "transponder_idx": 5,
+      "frequency_offset_hz": -12876284.071669022,
+      "cn_db": 17.0,
+      "symbol_rate_sps": 1400000.0,
+      "modulation": "APSK16",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": true,
+      "time_windows": []
+    },
+    {
+      "name": "Dynamic_2",
+      "transponder_idx": 4,
+      "frequency_offset_hz": -9808451.134464793,
+      "cn_db": 22.8,
+      "symbol_rate_sps": 1200000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.25,
+      "carrier_type": "FDMA",
+      "is_static": false,
+      "time_windows": [
+        {
+          "start_min": 600,
+          "end_min": 745
+        },
+        {
+          "start_min": 930,
+          "end_min": 1215
+        }
+      ]
+    },
+    {
+      "name": "Dynamic_8",
+      "transponder_idx": 1,
+      "frequency_offset_hz": 6168104.411908107,
+      "cn_db": 11.1,
+      "symbol_rate_sps": 1400000.0,
+      "modulation": "QPSK",
+      "rrc_rolloff": 0.35,
+      "carrier_type": "FDMA",
+      "is_static": false,
+      "time_windows": [
+        {
+          "start_min": 340,
+          "end_min": 485
+        },
+        {
+          "start_min": 860,
+          "end_min": 1055
+        }
+      ]
+    }
+  ],
+  "seed": 42
+}
