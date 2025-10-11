@@ -298,19 +298,27 @@ class Visualizer:
 
         return selected
 
-    def create_animated_spectrogram(self, fps: int = 15):
+    def create_animated_spectrogram(self, fps: int = 15, figsize: Tuple[float, float] = (19.2, 10.8),
+                                   frame_decimation: int = 1):
         """Create animated GIF showing PSD evolution over time.
 
-        Creates a 1920x1080 animated GIF with:
+        Creates an animated GIF with:
         - Top 1/3: Current PSD line plot
         - Bottom 2/3: Spectrogram with white line marking current time
 
         Args:
             fps: Frames per second for the GIF (default: 15)
+            figsize: Figure size in inches (width, height). Default (19.2, 10.8) = 1920x1080 at 100 DPI
+            frame_decimation: Frame decimation factor. Use every Nth frame (default: 1, no decimation)
         """
         print(f"\nCreating animated spectrogram GIF...")
         print(f"  Frame rate: {fps} fps")
-        print(f"  Total frames: {len(self.time_array)}")
+        print(f"  Figure size: {figsize[0]:.1f}x{figsize[1]:.1f} inches")
+        print(f"  Frame decimation: {frame_decimation}")
+
+        # Calculate frame indices with decimation
+        frame_indices = list(range(0, len(self.time_array), frame_decimation))
+        print(f"  Total frames: {len(frame_indices)} (of {len(self.time_array)} snapshots)")
 
         try:
             import imageio
@@ -331,12 +339,12 @@ class Visualizer:
         frames = []
 
         try:
-            for frame_idx in range(len(self.time_array)):
-                if frame_idx % 10 == 0:
-                    print(f"  Rendering frame {frame_idx + 1}/{len(self.time_array)} ({100*(frame_idx+1)/len(self.time_array):.0f}%)")
+            for i, frame_idx in enumerate(frame_indices):
+                if i % 10 == 0:
+                    print(f"  Rendering frame {i + 1}/{len(frame_indices)} ({100*(i+1)/len(frame_indices):.0f}%)")
 
-                # Create figure with custom size (1920x1080 pixels, 100 DPI = 19.2x10.8 inches)
-                fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+                # Create figure with custom size
+                fig = plt.figure(figsize=figsize, dpi=100)
 
                 # Create grid: top 1/3 for PSD, bottom 2/3 for spectrogram
                 gs = fig.add_gridspec(3, 1, hspace=0.3)
