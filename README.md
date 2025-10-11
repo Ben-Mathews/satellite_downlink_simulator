@@ -512,6 +512,73 @@ Supported modulation schemes with typical applications:
 - **16-APSK**: DVB-S2, more robust than 16-QAM (16 states)
 - **32-APSK**: DVB-S2, high spectral efficiency (32 states)
 
+## Testing
+
+The library includes a comprehensive test suite with visual validation.
+
+### Running Tests
+
+Run tests without HTML reports:
+```bash
+pytest
+```
+
+Run tests with HTML reports and embedded plots:
+```bash
+pytest --html=tests-reports/test-$(date +%Y%m%d-%H%M%S)/report.html --self-contained-html
+```
+
+On Windows:
+```bash
+pytest --html=tests-reports/test-%date:~-4%%date:~-10,2%%date:~-7,2%-%time:~0,2%%time:~3,2%%time:~6,2%/report.html --self-contained-html
+```
+
+### HTML Test Reports
+
+When running tests with the `--html` flag, pytest will:
+
+1. Create a timestamped directory: `tests-reports/test-YYYYMMDD-HHMMSS/`
+2. Generate `report.html` with detailed test results
+3. Save diagnostic plots to `tests-reports/test-YYYYMMDD-HHMMSS/plots/`
+4. Embed plots inline in the HTML report (click to expand)
+
+The HTML report includes:
+- Pass/fail status for all tests
+- Execution time for each test
+- Detailed error messages and tracebacks
+- **Visual plots** showing PSD comparisons, noise floor analysis, and carrier spectra
+- Test output and printed statistics
+
+### Test Categories
+
+**PSD Comparison Tests** (`test_psd_comparison.py`):
+- Compare direct PSD generation vs IQ→FFT computation
+- Multi-carrier and single-carrier validation
+- Noise floor matching
+- Carrier peak detection
+
+**Noise Floor Tests** (`test_noise_floor_comparison.py`):
+- Validate noise floor spectral shape matches between methods
+- Test different sample rates and oversampling ratios
+- Verify integrated noise power
+
+**Unit Tests** (`test_*.py`):
+- Carrier validation and power calculations
+- Transponder bandwidth and overlap detection
+- Beam composition and frequency planning
+- RRC filtering and modulation
+
+### Visual Test Output
+
+Tests automatically generate diagnostic plots when run with `--html`:
+
+- **PSD Comparison Plots**: Overlay of analytical PSD vs IQ-derived PSD with difference plots
+- **Noise Floor Plots**: Spectral shape comparison for empty transponders
+- **Carrier Spectrum Plots**: Detailed views of individual carriers with zoom
+- **Normalized Shape Plots**: Peak-normalized comparisons for shape validation
+
+Example plots are collapsed by default in the HTML report - click to expand any plot for detailed inspection.
+
 ## Project Structure
 
 ```

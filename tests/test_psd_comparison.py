@@ -8,6 +8,9 @@ the time-domain IQ generation followed by FFT analysis.
 import pytest
 import numpy as np
 from scipy import signal
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for testing
+import matplotlib.pyplot as plt
 from satellite_downlink_simulator.objects.transponder import Transponder
 from satellite_downlink_simulator.objects.carrier import Carrier
 from satellite_downlink_simulator.objects.enums import CarrierType, ModulationType
@@ -92,7 +95,7 @@ def transponder_10_carriers(random_seed):
 class TestPSDComparison:
     """Test PSD comparison between direct generation and IQ->FFT."""
 
-    def test_psd_comparison_basic(self, transponder_10_carriers):
+    def test_psd_comparison_basic(self, transponder_10_carriers, plots_dir, attach_plot):
         """
         Compare direct PSD generation with IQ->FFT PSD for 10 carriers.
 
@@ -143,6 +146,41 @@ class TestPSDComparison:
         print(f"Min direct PSD: {np.min(psd_direct):.1f} dBm/Hz")
         print(f"Max direct PSD: {np.max(psd_direct):.1f} dBm/Hz")
 
+        # Generate plot if HTML report requested
+        if plots_dir is not None:
+            fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+
+            # Convert frequencies to MHz offset from center for plotting
+            center_freq = transponder_10_carriers.center_frequency_hz
+            freq_offset_direct = (freq_direct - center_freq) / 1e6
+            freq_offset_iq = (freq_iq - center_freq) / 1e6
+
+            # Top plot: Full spectrum comparison
+            axes[0].plot(freq_offset_direct, psd_direct, 'b-', label='Direct PSD (analytical)', linewidth=2, alpha=0.8)
+            axes[0].plot(freq_offset_iq, psd_iq, 'r-', label='IQ→FFT PSD', linewidth=1.5, alpha=0.6)
+            axes[0].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[0].set_ylabel('PSD (dBm/Hz)')
+            axes[0].set_title(f'Multi-Carrier PSD Comparison ({len(transponder_10_carriers.carriers)} carriers)')
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+
+            # Bottom plot: Difference
+            axes[1].plot(freq_offset_direct, diff_db, 'k-', linewidth=1)
+            axes[1].axhline(y=0, color='r', linestyle='--', linewidth=2)
+            axes[1].axhline(y=np.mean(diff_db), color='orange', linestyle=':', label=f'Mean = {np.mean(diff_db):.2f} dB')
+            axes[1].fill_between(freq_offset_direct, -10, 10, alpha=0.1, color='green', label='±10 dB tolerance')
+            axes[1].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[1].set_ylabel('Difference (dB)')
+            axes[1].set_title(f'Direct - IQ PSD Difference (RMS: {rms_error:.2f} dB)')
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            plot_path = plots_dir / 'psd_comparison_multi_carrier.png'
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            attach_plot(plot_path)
+
         # Assert that RMS error is within acceptable tolerance
         # Note: The two methods have fundamental differences that prevent perfect agreement:
         # - Noise scaling in time vs frequency domain
@@ -155,7 +193,7 @@ class TestPSDComparison:
         assert np.max(psd_direct) > np.median(psd_direct) + 5, "Direct PSD should show carrier peaks"
         assert np.max(psd_iq_interp) > np.median(psd_iq_interp) + 5, "IQ PSD should show carrier peaks"
 
-    def test_psd_comparison_single_carrier(self, simple_transponder):
+    def test_psd_comparison_single_carrier(self, simple_transponder, plots_dir, attach_plot):
         """Test PSD comparison with a single carrier for better accuracy."""
         # Add single carrier
         carrier = Carrier(
@@ -206,6 +244,54 @@ class TestPSDComparison:
         print(f"\n=== Single Carrier PSD Comparison ===")
         print(f"RMS error: {rms_error:.3f} dB")
         print(f"Mean error: {np.mean(diff_db):.3f} dB")
+
+        # Generate plot if HTML report requested
+        if plots_dir is not None:
+            fig, axes = plt.subplots(3, 1, figsize=(14, 12))
+
+            # Convert frequencies to MHz offset from center for plotting
+            center_freq = simple_transponder.center_frequency_hz
+            freq_offset_direct = (freq_direct - center_freq) / 1e6
+            freq_offset_iq = (freq_iq - center_freq) / 1e6
+
+            # Top plot: Full spectrum overlay
+            axes[0].plot(freq_offset_direct, psd_direct, 'b-', label='Direct PSD (analytical)', linewidth=2)
+            axes[0].plot(freq_offset_iq, psd_iq, 'r-', label='IQ→FFT PSD', linewidth=1.5, alpha=0.7)
+            axes[0].axhline(y=10*np.log10(simple_transponder.noise_power_density_watts_per_hz * 1000),
+                           color='g', linestyle='--', alpha=0.5, label='Noise floor')
+            axes[0].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[0].set_ylabel('PSD (dBm/Hz)')
+            axes[0].set_title('Single Carrier PSD Comparison')
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+
+            # Middle plot: Zoomed to carrier
+            carrier_bw_mhz = carrier.bandwidth_hz / 1e6
+            zoom_range = carrier_bw_mhz * 1.5  # Show 1.5x carrier bandwidth
+            zoom_mask = np.abs(freq_offset_direct) <= zoom_range
+            axes[1].plot(freq_offset_direct[zoom_mask], psd_direct[zoom_mask], 'b-', label='Direct PSD', linewidth=2)
+            axes[1].plot(freq_offset_direct[zoom_mask], psd_iq_interp[zoom_mask], 'r-', label='IQ→FFT PSD', linewidth=2, alpha=0.7)
+            axes[1].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[1].set_ylabel('PSD (dBm/Hz)')
+            axes[1].set_title(f'Zoomed Carrier View (±{zoom_range:.1f} MHz)')
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+
+            # Bottom plot: Difference
+            axes[2].plot(freq_offset_direct, diff_db, 'k-', linewidth=1)
+            axes[2].axhline(y=0, color='r', linestyle='--', linewidth=2)
+            axes[2].axhline(y=np.mean(diff_db), color='orange', linestyle=':', label=f'Mean = {np.mean(diff_db):.2f} dB')
+            axes[2].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[2].set_ylabel('Difference (dB)')
+            axes[2].set_title(f'Direct - IQ PSD Difference (RMS: {rms_error:.2f} dB)')
+            axes[2].legend()
+            axes[2].grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            plot_path = plots_dir / 'psd_comparison_single_carrier.png'
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            attach_plot(plot_path)
 
         # The two methods don't match perfectly due to fundamental differences:
         # - Direct PSD: Analytic computation

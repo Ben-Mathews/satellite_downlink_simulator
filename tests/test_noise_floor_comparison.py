@@ -9,6 +9,9 @@ IQ generation followed by FFT analysis.
 import pytest
 import numpy as np
 from scipy import signal
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for testing
+import matplotlib.pyplot as plt
 from satellite_downlink_simulator.objects.transponder import Transponder
 from satellite_downlink_simulator.simulation.psd import generate_psd
 from satellite_downlink_simulator.simulation.iq import generate_iq
@@ -61,7 +64,7 @@ def compute_psd_from_iq(iq_data, sample_rate_hz, center_frequency_hz, nperseg=10
 class TestNoiseFloorComparison:
     """Test noise floor comparison between direct generation and IQ->FFT."""
 
-    def test_noise_floor_shape_and_power_match(self, simple_transponder):
+    def test_noise_floor_shape_and_power_match(self, simple_transponder, plots_dir, attach_plot):
         """
         Test that noise floor shape and power match between PSD and IQ methods.
 
@@ -147,6 +150,42 @@ class TestNoiseFloorComparison:
         print(f"IQ/Expected ratio: {power_iq / expected_power:.3f}")
         print(f"IQ/Direct ratio: {power_iq / power_direct:.3f}")
 
+        # Generate plot if HTML report requested
+        if plots_dir is not None:
+            fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+
+            # Convert frequencies to MHz offset from center for plotting
+            center_freq = simple_transponder.center_frequency_hz
+            freq_offset_direct = (freq_direct - center_freq) / 1e6
+            freq_offset_iq = (freq_iq_transponder - center_freq) / 1e6
+
+            # Top plot: PSD comparison
+            axes[0].plot(freq_offset_direct, psd_direct, 'b-', label='Direct PSD', linewidth=2)
+            axes[0].plot(freq_offset_direct, psd_iq_interp, 'r-', label='IQ→FFT PSD (interpolated)', alpha=0.7, linewidth=2)
+            axes[0].axhline(y=10*np.log10(simple_transponder.noise_power_density_watts_per_hz * 1000),
+                           color='g', linestyle='--', label=f'Expected N₀ = {10*np.log10(simple_transponder.noise_power_density_watts_per_hz * 1000):.1f} dBm/Hz')
+            axes[0].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[0].set_ylabel('PSD (dBm/Hz)')
+            axes[0].set_title('Noise Floor Comparison: Direct PSD vs IQ→FFT')
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+
+            # Bottom plot: Difference
+            axes[1].plot(freq_offset_direct, diff_db, 'k-', linewidth=1)
+            axes[1].axhline(y=0, color='r', linestyle='--', linewidth=2)
+            axes[1].fill_between(freq_offset_direct, -3, 3, alpha=0.2, color='green', label='±3 dB tolerance')
+            axes[1].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[1].set_ylabel('Difference (dB)')
+            axes[1].set_title(f'Direct - IQ PSD Difference (RMS error: {rms_error:.3f} dB)')
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            plot_path = plots_dir / 'noise_floor_shape_and_power.png'
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            attach_plot(plot_path)
+
         # Assertions:
         # 1. RMS error should be small (within a few dB)
         #    Note: Some difference is expected due to statistical estimation vs analytical
@@ -164,7 +203,7 @@ class TestNoiseFloorComparison:
         assert 0.5 < power_iq / expected_power < 2.0, \
             f"IQ PSD power ratio {power_iq / expected_power:.3f} outside [0.5, 2.0]"
 
-    def test_noise_floor_shape_detailed(self, simple_transponder):
+    def test_noise_floor_shape_detailed(self, simple_transponder, plots_dir, attach_plot):
         """
         Detailed test of noise floor spectral shape matching.
 
@@ -221,13 +260,48 @@ class TestNoiseFloorComparison:
         print(f"Max shape difference: {max_shape_diff:.3f} dB")
         print(f"Mean shape difference: {mean_shape_diff:.3f} dB")
 
+        # Generate plot if HTML report requested
+        if plots_dir is not None:
+            fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+
+            # Convert frequencies to MHz offset from center for plotting
+            center_freq = simple_transponder.center_frequency_hz
+            freq_offset_direct = (freq_direct - center_freq) / 1e6
+
+            # Top plot: Normalized PSDs
+            axes[0].plot(freq_offset_direct, psd_direct_normalized, 'b-', label='Direct PSD (normalized)', linewidth=2)
+            axes[0].plot(freq_offset_direct, psd_iq_normalized, 'r-', label='IQ→FFT PSD (normalized)', alpha=0.7, linewidth=2)
+            axes[0].axhline(y=0, color='g', linestyle='--', label='Peak = 0 dB (normalized)')
+            axes[0].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[0].set_ylabel('Normalized PSD (dB relative to peak)')
+            axes[0].set_title('Normalized Noise Floor Shape Comparison')
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+            axes[0].set_ylim(-15, 2)
+
+            # Bottom plot: Absolute difference
+            axes[1].plot(freq_offset_direct, shape_diff, 'k-', linewidth=1)
+            axes[1].axhline(y=mean_shape_diff, color='orange', linestyle='--', label=f'Mean = {mean_shape_diff:.3f} dB')
+            axes[1].axhline(y=3, color='r', linestyle=':', alpha=0.5, label='3 dB threshold')
+            axes[1].set_xlabel('Frequency Offset from Center (MHz)')
+            axes[1].set_ylabel('Absolute Difference (dB)')
+            axes[1].set_title(f'Normalized Shape Difference (Max: {max_shape_diff:.3f} dB)')
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            plot_path = plots_dir / 'noise_floor_normalized_shape.png'
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            attach_plot(plot_path)
+
         # The normalized shapes should match closely
         assert max_shape_diff < 10.0, \
             f"Max normalized shape difference {max_shape_diff:.3f} dB exceeds 10 dB"
         assert mean_shape_diff < 3.0, \
             f"Mean normalized shape difference {mean_shape_diff:.3f} dB exceeds 3 dB"
 
-    def test_noise_floor_with_different_sample_rates(self, simple_transponder):
+    def test_noise_floor_with_different_sample_rates(self, simple_transponder, plots_dir, attach_plot):
         """
         Test that noise floor matches even with different sample rates.
 
@@ -285,6 +359,31 @@ class TestNoiseFloorComparison:
         print(f"\n=== Low Oversampling Test (1.1x BW) ===")
         print(f"Sample rate: {metadata_iq.sample_rate_hz / 1e6:.2f} MHz")
         print(f"Power ratio: {power_ratio:.3f}")
+
+        # Generate plot if HTML report requested
+        if plots_dir is not None:
+            fig, ax = plt.subplots(figsize=(12, 6))
+
+            # Convert frequencies to MHz offset from center for plotting
+            center_freq = simple_transponder.center_frequency_hz
+            freq_offset_direct = (freq_direct - center_freq) / 1e6
+
+            # Plot PSDs
+            ax.plot(freq_offset_direct, psd_direct, 'b-', label='Direct PSD', linewidth=2)
+            ax.plot(freq_offset_direct, psd_iq_interp, 'r-', label=f'IQ→FFT PSD (1.1× oversample)', alpha=0.7, linewidth=2)
+            ax.axhline(y=10*np.log10(simple_transponder.noise_power_density_watts_per_hz * 1000),
+                      color='g', linestyle='--', label=f'Expected N₀')
+            ax.set_xlabel('Frequency Offset from Center (MHz)')
+            ax.set_ylabel('PSD (dBm/Hz)')
+            ax.set_title(f'Noise Floor with Low Oversampling (Sample Rate: {metadata_iq.sample_rate_hz/1e6:.2f} MHz, Power Ratio: {power_ratio:.3f})')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            plot_path = plots_dir / 'noise_floor_low_oversampling.png'
+            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            attach_plot(plot_path)
 
         # Should still match reasonably well even with minimal oversampling
         assert 0.7 < power_ratio < 1.3, \
