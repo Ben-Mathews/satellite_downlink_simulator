@@ -4,9 +4,37 @@ This document provides critical context about the Satellite Spectrum Emulator co
 
 ## Project Overview
 
-This is a Python library for simulating realistic satellite communication signals. It generates both Power Spectral Density (PSD) plots and time-domain IQ data for satellite transponders and beams.
+This is a Python library for modeling and simulating satellite communication systems. It provides:
 
-**Primary Use Case**: Create realistic synthetic satellite spectrum data for testing, analysis, and visualization without requiring actual satellite hardware.
+1. **Object Model**: Hierarchical representation of satellite downlinks using Carrier, Transponder, and Beam objects
+2. **Signal Generation**: Functions to produce realistic Power Spectral Density (PSD) and In-phase/Quadrature (IQ) data
+3. **Applications**: Example use cases demonstrating the library's capabilities
+
+### Core Library (`satellite_downlink_simulator/`)
+
+The core library provides object-oriented abstractions for satellite communication systems:
+
+- **Objects** (`objects/`): Carrier, Transponder, Beam classes with physical parameter validation
+- **Simulation** (`simulation/`): PSD and IQ generation functions operating on these objects
+- **Utilities** (`utils.py`): Signal processing functions (RRC filters, constellations, noise, validation)
+
+**Key Design Philosophy**:
+- Objects represent physical RF architecture (what exists in the satellite system)
+- Simulation functions generate synthetic measurements (what you'd see on test equipment)
+- Separation allows flexible composition: build any scenario, generate any measurement type
+
+### Example Applications (`apps/`)
+
+The library includes example applications demonstrating real-world use cases:
+
+**RF Pattern of Life** (`apps/rf_pattern_of_life_example/`): Simulates 24-hour temporal evolution of satellite spectrum with dynamic carriers and interferers. Demonstrates using the core library to model time-varying scenarios with visualization and analysis tools.
+
+**Primary Use Cases**:
+- Create synthetic satellite spectrum data for testing without actual satellite hardware
+- Model realistic multi-carrier scenarios for spectrum planning and analysis
+- Generate IQ samples for demodulator and signal processing algorithm development
+- Produce training data for machine learning applications in satellite communications
+- Visualize spectrum occupancy and interference scenarios
 
 ## Key Design Decisions
 
@@ -558,6 +586,83 @@ sample_rate_hz = None  # Use default 1.25× bandwidth, or specify custom rate
 # For hardware matching: sample_rate_hz = <your_adc_sample_rate>
 ```
 
+## RF Pattern of Life Application
+
+**Location**: `apps/rf_pattern_of_life_example/`
+
+This application demonstrates using the core library to simulate temporal evolution of satellite spectrum over 24 hours, with time-varying carrier activity and interferers.
+
+### Application Architecture
+
+- **main.py**: CLI orchestration with argparse for simulation parameters
+- **carrier_generator.py**: Generates static and dynamic carrier configurations with time windows
+- **interferer_generator.py**: Creates CW interferers (STATIC_CW carriers) with sweeping behavior
+- **psd_simulator.py**: Manages temporal simulation, generating PSD snapshots at regular intervals
+- **visualization.py**: Creates plots (waterfall, activity timeline, snapshots, animated GIF)
+- **config.json**: Example configuration file for carrier/interferer parameters
+
+### Key Features
+
+1. **Static Carriers**: Always-on carriers with optional time windows for activity periods
+2. **Dynamic TDMA Carriers**: Bursting carriers with duty cycles
+3. **Long-Duration Interferers**: Hours-long CW tones, often targeting specific carriers
+4. **Short-Duration Interferers**: Minutes-long CW tones with faster sweeps
+5. **Frequency Sweeping**: Linear and sawtooth sweep patterns for interferers
+6. **Visualization Suite**: Waterfall plots, activity timelines, snapshot comparisons, animated GIFs
+
+### CLI Arguments (with unit suffixes)
+
+All time, frequency, and power arguments include unit suffixes for clarity:
+- `--duration-min`: Simulation duration in minutes (default: 1440 = 24 hours)
+- `--interval-min`: Snapshot interval in minutes (default: 5)
+- `--rbw-hz`: Resolution bandwidth in Hz (default: 100000 = 100 kHz)
+- `--vbw-hz`: Video bandwidth in Hz (default: 1000 = 1 kHz)
+
+### Interferer Generation Strategy
+
+Interferers are implemented as STATIC_CW carriers with boosted C/N to ensure visibility:
+
+**Long-Duration Interferers** (3-23 hours):
+- 80% chance to target a static carrier
+- C/N boost: +5 to +15 dB above target carrier
+- 40% chance to sweep (10-200 MHz/hr)
+- Frequency positioned within or near target carrier bandwidth
+
+**Short-Duration Interferers** (10 min - 3 hours):
+- 90% chance to target any carrier (static or dynamic)
+- C/N boost: +5 to +12 dB above target carrier
+- 30% chance to sweep (50-500 MHz/hr)
+- More aggressive sweep rates for short durations
+
+**C/N Boosting Logic**: Critical for interferer visibility. Interferers must have higher C/N than their target carriers to appear prominently in PSD plots. The boost ensures interferers create noticeable spectral features.
+
+### Animated Spectrogram
+
+The `create_animated_spectrogram()` method generates 1920x1080 animated GIFs showing temporal evolution:
+- Top 1/3: Current PSD line plot
+- Bottom 2/3: Full 24-hour spectrogram with white line marking current time
+- Configurable: `figsize` (resolution), `frame_decimation` (skip frames), `fps` (frame rate)
+- Uses imageio library with matplotlib Agg backend for headless rendering
+
+### Output Files
+
+- `psd_snapshots.npz`: Compressed numpy arrays (time, frequency, PSD)
+- `simulation_metadata.json`: Simulation parameters and statistics
+- `activity_log.json`: Carrier/interferer counts at each snapshot
+- `plots/waterfall_plot.png`: 24-hour spectrogram
+- `plots/activity_timeline.png`: Carrier and interferer activity over time
+- `plots/snapshot_comparison.png`: PSD at selected interesting times
+- `plots/average_spectrum.png`: Mean spectrum with percentiles
+- `plots/animated_spectrogram.gif`: Animated evolution (if created)
+
+### Implementation Notes
+
+**STATIC_CW Rendering**: Interferers use the STATIC_CW modulation type, which renders as impulses (delta functions) in the PSD. Power is concentrated in a single frequency bin: `PSD = power_watts / 100 Hz`. This creates sharp spectral lines characteristic of CW tones.
+
+**Overlap Handling**: Interferers are added with `allow_overlap=True` temporarily enabled, since they intentionally overlap with existing carriers (that's the point of interference).
+
+**Time Windows**: Static carriers can have activity windows (start/end times) to simulate scheduled communications or temporary outages.
+
 ## Contact and Maintenance
 
 This library was developed iteratively with the following key objectives:
@@ -566,4 +671,4 @@ This library was developed iteratively with the following key objectives:
 - Ease of use (intuitive C/N-based power specification)
 - Flexibility (random carrier generation, multiple modulation types)
 
-When in doubt about implementation details, refer to the inline comments in `generation.py` which contain detailed explanations of the physical modeling.
+When in doubt about implementation details, refer to the inline comments in the simulation code which contain detailed explanations of the physical modeling.

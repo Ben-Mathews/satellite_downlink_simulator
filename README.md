@@ -1,18 +1,40 @@
 # Satellite Downlink Simulator
 
-A Python library for simulating satellite transponder and carrier signals, generating realistic Power Spectral Density (PSD) plots and In-phase/Quadrature (IQ) time-domain data for satellite communications systems.
+A Python library for modeling and simulating satellite communication systems. Build hierarchical representations of satellite downlinks using **Carriers**, **Transponders**, and **Beams**, then generate realistic synthetic Power Spectral Density (PSD) and In-phase/Quadrature (IQ) data for analysis, testing, and visualization.
 
-## Features
+## Overview
 
-- **Realistic Signal Generation**: Creates PSD and IQ data for satellite transponders and beams
-- **Multiple Modulation Types**: Supports BPSK, QPSK, 16-QAM, 16-APSK, and 32-APSK
-- **FDMA and TDMA Carriers**: Model both frequency-division and time-division multiple access
-- **RRC Pulse Shaping**: Root-raised-cosine filtering with configurable rolloff factors
-- **Multi-Transponder Beams**: Simulate entire satellite beams with multiple adjacent transponders
-- **Carrier-to-Noise Control**: Specify C/N ratios for realistic signal power levels
-- **Measurement Noise**: Configurable noise based on RBW/VBW settings
-- **Random Carrier Placement**: Automatically generate non-overlapping carriers within transponders
-- **Validation**: Built-in checks for carrier overlap and bandwidth constraints
+The Satellite Downlink Simulator provides object-oriented abstractions and signal generation capabilities for satellite communications:
+
+### Core Object Model
+
+The library is built around three primary objects that represent the physical architecture of satellite communication systems:
+
+- **Carrier**: Individual communication signals with specific modulation, symbol rate, power level (C/N), and access type (FDMA/TDMA)
+- **Transponder**: Satellite transponder channels containing multiple carriers, with defined bandwidth, center frequency, and noise characteristics
+- **Beam**: Satellite beam footprints composed of multiple adjacent transponders, representing complete downlink coverage areas
+
+These objects can be composed hierarchically (Beam → Transponders → Carriers) to model realistic satellite communication systems at any level of complexity.
+
+### Signal Generation Capabilities
+
+Two complementary signal generation functions operate on these objects:
+
+- **PSD Generation** (`generate_psd()`): Fast frequency-domain synthesis producing calibrated power spectral density plots. Efficient for visualization and spectrum analysis without time-domain processing overhead.
+
+- **IQ Generation** (`generate_iq()`): Time-domain synthesis producing complex baseband samples with accurate modulation, pulse shaping, and temporal characteristics. Essential for waveform analysis, demodulation testing, and hardware-in-the-loop applications.
+
+Both functions accept Beam or Transponder objects and produce physically accurate outputs matching real-world spectrum analyzer and digitizer measurements.
+
+### Key Features
+
+- **Multiple Modulation Types**: BPSK, QPSK, 16-QAM, 16-APSK, 32-APSK, plus STATIC_CW for unmodulated tones
+- **FDMA and TDMA Support**: Full frequency-division and time-division multiple access modeling with burst patterns
+- **Physical Accuracy**: RRC pulse shaping, realistic noise modeling, spectrum analyzer RBW/VBW relationships
+- **C/N-Based Power Control**: Industry-standard carrier-to-noise specification rather than absolute power
+- **Automated Carrier Placement**: Intelligent algorithms for generating non-overlapping multi-carrier scenarios
+- **Validation and Constraints**: Built-in checks for bandwidth limits, carrier overlap, parameter consistency
+- **Configurable Fidelity**: Adjustable sample rates, resolution bandwidth, and noise characteristics
 
 ## Installation
 
@@ -491,17 +513,24 @@ Supported modulation schemes with typical applications:
 ## Project Structure
 
 ```
-satellite_spectrum_emulator/
-├── satellite_spectrum_emulator/
-│   ├── __init__.py          # Package initialization
-│   ├── enums.py             # Enumerations (Band, Polarization, etc.)
-│   ├── carrier.py           # Carrier class
-│   ├── transponder.py       # Transponder class
-│   ├── beam.py              # Beam class
-│   ├── metadata.py          # Metadata classes for PSD/IQ
-│   ├── generation.py        # PSD and IQ generation functions
-│   └── utils.py             # Signal processing utilities
-├── main.py                  # Examples and test cases
+satellite_downlink_simulator/
+├── satellite_downlink_simulator/
+│   ├── __init__.py          # Top-level exports (backward compatibility)
+│   ├── objects/             # Object model definitions
+│   │   ├── __init__.py
+│   │   ├── carrier.py       # Carrier class
+│   │   ├── transponder.py   # Transponder class
+│   │   ├── beam.py          # Beam class
+│   │   ├── metadata.py      # Metadata classes for PSD/IQ
+│   │   └── enums.py         # Enumerations (Band, Polarization, ModulationType, etc.)
+│   ├── simulation/          # Signal generation functions
+│   │   ├── __init__.py
+│   │   ├── psd.py           # PSD generation (frequency domain)
+│   │   └── iq.py            # IQ generation (time domain)
+│   └── utils.py             # Signal processing utilities (RRC, constellations, validation)
+├── apps/                    # Example applications
+│   └── rf_pattern_of_life_example/  # 24-hour temporal simulation example
+├── main.py                  # Basic examples and test cases
 ├── setup.py                 # Package configuration
 └── README.md                # This file
 ```
