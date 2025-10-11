@@ -1,6 +1,8 @@
 # CLAUDE.md - Context for Future Claude Sessions
 
-This document provides critical context about the Satellite Spectrum Emulator codebase to help future Claude sessions understand the design decisions, implementation details, and evolution of this project.
+This document provides critical context about the Satellite Downlink Simulator codebase to help future Claude sessions understand the design decisions, implementation details, and evolution of this project.
+
+**Last Updated**: January 2025 - Added MP4 output format support and imageio[ffmpeg] dependency
 
 ## Project Overview
 
@@ -477,11 +479,18 @@ add_measurement_noise(linear_array, noise_std_db)
 
 ## Dependencies and Requirements
 
-- **numpy**: All numerical operations and array processing
-- **attrs**: Class definitions with validation
-- **matplotlib**: Plotting (only in examples, not core library)
+### Core Library Dependencies
 
-**No scipy dependency**: All signal processing is implemented from scratch.
+- **numpy >= 1.20.0**: All numerical operations and array processing
+- **scipy >= 1.7.0**: Required for certain signal processing operations
+- **attrs >= 21.0.0**: Class definitions with validation
+- **matplotlib >= 3.3.0**: Plotting (used in examples and RF Pattern of Life app)
+- **imageio[ffmpeg] >= 2.9.0**: Animated visualization export (GIF and MP4 formats)
+
+**Key Notes**:
+- `imageio[ffmpeg]` installs imageio with FFmpeg support for MP4 video encoding
+- FFmpeg enables H.264/MP4 output in addition to GIF format
+- All signal processing for the core library (RRC filters, constellations) is implemented from scratch without external DSP libraries
 
 ## Future Enhancement Ideas
 
@@ -638,11 +647,16 @@ Interferers are implemented as STATIC_CW carriers with boosted C/N to ensure vis
 
 ### Animated Spectrogram
 
-The `create_animated_spectrogram()` method generates 1920x1080 animated GIFs showing temporal evolution:
+The `create_animated_spectrogram()` method generates animated visualizations showing temporal evolution:
 - Top 1/3: Current PSD line plot
 - Bottom 2/3: Full 24-hour spectrogram with white line marking current time
-- Configurable: `figsize` (resolution), `frame_decimation` (skip frames), `fps` (frame rate)
-- Uses imageio library with matplotlib Agg backend for headless rendering
+- Configurable parameters:
+  - `figsize`: Resolution in inches (default: 19.2x10.8 = 1920x1080 at 100 DPI)
+  - `frame_decimation`: Skip frames to reduce file size (default: 1 = no decimation)
+  - `fps`: Frames per second (default: 15)
+  - `output_format`: File format - 'gif' or 'mp4' (default: 'gif')
+- Uses imageio[ffmpeg] library with matplotlib Agg backend for headless rendering
+- MP4 encoding uses H.264 codec (libx264) with high quality settings for compatibility
 
 ### Output Files
 
@@ -653,7 +667,8 @@ The `create_animated_spectrogram()` method generates 1920x1080 animated GIFs sho
 - `plots/activity_timeline.png`: Carrier and interferer activity over time
 - `plots/snapshot_comparison.png`: PSD at selected interesting times
 - `plots/average_spectrum.png`: Mean spectrum with percentiles
-- `plots/animated_spectrogram.gif`: Animated evolution (if created)
+- `plots/animated_spectrogram.gif`: Animated GIF evolution (if created with format='gif')
+- `plots/animated_spectrogram.mp4`: Animated MP4 evolution (if created with format='mp4')
 
 ### Implementation Notes
 
@@ -662,6 +677,12 @@ The `create_animated_spectrogram()` method generates 1920x1080 animated GIFs sho
 **Overlap Handling**: Interferers are added with `allow_overlap=True` temporarily enabled, since they intentionally overlap with existing carriers (that's the point of interference).
 
 **Time Windows**: Static carriers can have activity windows (start/end times) to simulate scheduled communications or temporary outages.
+
+**Output Format Selection**: The animated spectrogram can be exported as either GIF or MP4:
+- **GIF**: Larger file size (~8-10 MB for 289 frames), universal compatibility, no codec dependencies
+- **MP4**: Smaller file size (~1-2 MB for 289 frames), better compression, requires FFmpeg/H.264 support
+- Usage: `viz.create_animated_spectrogram(output_format='mp4')` or `output_format='gif'`
+- MP4 encoding parameters: `codec='libx264'`, `quality=8` (high quality), `pixelformat='yuv420p'` (standard compatibility)
 
 ## Contact and Maintenance
 
