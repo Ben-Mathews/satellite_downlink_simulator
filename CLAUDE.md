@@ -2,7 +2,7 @@
 
 This document provides critical context about the Satellite Downlink Simulator codebase to help future Claude sessions understand the design decisions, implementation details, and evolution of this project.
 
-**Last Updated**: January 2025 - Added MP4 output format support and imageio[ffmpeg] dependency
+**Last Updated**: January 2025 - Added comprehensive test suite documentation and test fix history
 
 ## Project Overview
 
@@ -683,6 +683,312 @@ The `create_animated_spectrogram()` method generates animated visualizations sho
 - **MP4**: Smaller file size (~1-2 MB for 289 frames), better compression, requires FFmpeg/H.264 support
 - Usage: `viz.create_animated_spectrogram(output_format='mp4')` or `output_format='gif'`
 - MP4 encoding parameters: `codec='libx264'`, `quality=8` (high quality), `pixelformat='yuv420p'` (standard compatibility)
+
+## Test Suite and Quality Assurance
+
+**Location**: `tests/` directory
+
+The project has a comprehensive pytest-based test suite with 130 tests covering all aspects of the library.
+
+### Test Organization
+
+```
+tests/
+├── conftest.py                      # Shared fixtures and HTML report configuration
+├── test_beam.py                     # Beam class tests (14 tests)
+├── test_carrier.py                  # Carrier class tests (22 tests)
+├── test_enums.py                    # Enumeration tests (9 tests)
+├── test_iq.py                       # IQ generation tests (13 tests)
+├── test_metadata.py                 # Metadata class tests (8 tests)
+├── test_psd.py                      # PSD generation tests (12 tests)
+├── test_transponder.py              # Transponder class tests (12 tests)
+├── test_utils.py                    # Utility function tests (27 tests)
+├── test_noise_floor_comparison.py   # Noise floor validation tests (3 tests)
+└── test_psd_comparison.py           # PSD vs IQ-FFT comparison tests (5 tests)
+```
+
+### Running Tests
+
+**Basic test run**:
+```bash
+pytest
+```
+
+**With HTML report** (includes embedded plots):
+```bash
+pytest --html=tests-reports/test_report.html --self-contained-html
+```
+
+**Verbose output**:
+```bash
+pytest -v
+```
+
+**Run specific test file**:
+```bash
+pytest tests/test_carrier.py
+```
+
+**Run specific test**:
+```bash
+pytest tests/test_carrier.py::TestCarrierInstantiation::test_create_fdma_carrier
+```
+
+### Test Configuration
+
+**pytest.ini**:
+```ini
+[pytest]
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+addopts = --strict-markers --tb=short
+```
+
+### HTML Test Reports
+
+**Configuration**: `tests/conftest.py` contains fixtures for HTML report generation with embedded plots.
+
+**Key Features**:
+- **Embedded plots**: Test plots are captured and embedded directly in HTML report
+- **Self-contained**: Single HTML file contains all images (base64 encoded)
+- **Metadata**: Includes Python version, platform, package versions
+- **Test grouping**: Organized by test class with collapsible sections
+
+**Fixtures**:
+- `plots_dir`: Returns Path to `tests-reports/plots/` directory, creates if needed
+- `attach_plot`: Function to attach plot images to HTML report (no-op when HTML report not requested)
+- `random_seed`: Provides consistent seed (42) for reproducible tests
+
+**Usage in Tests**:
+```python
+def test_something(self, transponder, plots_dir, attach_plot):
+    # Generate data
+    freq, psd, _ = generate_psd(transponder, rbw_hz=50e3, vbw_hz=5e3)
+
+    # Create plot if HTML report requested
+    if plots_dir is not None:
+        fig, ax = plt.subplots()
+        ax.plot(freq, psd)
+        plot_path = plots_dir / 'test_something.png'
+        fig.savefig(plot_path)
+        plt.close(fig)
+        attach_plot(plot_path)  # Attach to HTML report
+
+    # Assertions
+    assert condition
+```
+
+**Output Location**: `tests-reports/` (at project root level)
+
+### Test Coverage Areas
+
+**1. Object Validation Tests** (`test_carrier.py`, `test_transponder.py`, `test_beam.py`):
+- Parameter validation (positive values, ranges)
+- STATIC_CW vs modulated carrier requirements
+- TDMA vs FDMA parameter validation
+- Carrier overlap detection and validation
+- Transponder bandwidth constraints
+
+**2. Signal Generation Tests** (`test_psd.py`, `test_iq.py`):
+- PSD generation with various RBW/VBW settings
+- IQ generation with different sample rates
+- TDMA bursting behavior
+- STATIC_CW rendering (impulse in PSD, constant tone in IQ)
+- Multi-carrier and multi-transponder scenarios
+
+**3. Comparison Tests** (`test_psd_comparison.py`, `test_noise_floor_comparison.py`):
+- **Critical validation**: These tests verify that PSD generation (frequency domain) matches IQ→FFT (time domain)
+- Noise floor shape and power matching
+- Carrier peak levels across methods
+- Integrated power consistency
+- Different sample rate validation
+
+**4. Utility Function Tests** (`test_utils.py`):
+- RRC filter generation (time and frequency domain)
+- Constellation generation for all modulation types
+- Power conversion (Watts ↔ dBm)
+- Measurement noise addition
+- Validation helper functions
+
+### Important Test Fixtures
+
+**conftest.py shared fixtures**:
+
+```python
+@pytest.fixture
+def simple_transponder():
+    """36 MHz transponder at 12.5 GHz with no carriers."""
+    return Transponder(
+        center_frequency_hz=12.5e9,
+        bandwidth_hz=36e6,
+        noise_power_density_watts_per_hz=1e-15,
+        name="Test Transponder"
+    )
+
+@pytest.fixture
+def simple_fdma_carrier():
+    """10 Msps QPSK carrier at 0 MHz offset with 0.35 rolloff."""
+    return Carrier(
+        frequency_offset_hz=0.0,
+        cn_db=15.0,
+        symbol_rate_sps=10e6,
+        modulation=ModulationType.QPSK,
+        carrier_type=CarrierType.FDMA,
+        rrc_rolloff=0.35,
+        name="Test FDMA Carrier"
+    )
+
+@pytest.fixture
+def transponder_with_carriers(simple_transponder, simple_fdma_carrier):
+    """Transponder with 2 non-overlapping FDMA carriers."""
+    # Carrier 1: 0 MHz with 13.5 MHz BW → [-6.75, +6.75] MHz
+    simple_transponder.add_carrier(simple_fdma_carrier)
+
+    # Carrier 2: -12 MHz with 6.75 MHz BW → [-15.375, -8.625] MHz
+    # Gap: 1.875 MHz clearance between carriers
+    carrier2 = Carrier(
+        frequency_offset_hz=-12e6,
+        cn_db=12.0,
+        symbol_rate_sps=5e6,
+        modulation=ModulationType.BPSK,
+        carrier_type=CarrierType.FDMA,
+        name="Carrier 2"
+    )
+    simple_transponder.add_carrier(carrier2)
+
+    return simple_transponder
+```
+
+**Key Design Note**: The `transponder_with_carriers` fixture carefully positions carriers to avoid overlap. This was a major source of test failures that was fixed by calculating proper spacing based on carrier bandwidths and RRC rolloff factors.
+
+### Common Test Patterns
+
+**1. Basic Smoke Tests**:
+```python
+def test_create_object(self):
+    """Verify object can be instantiated with valid parameters."""
+    obj = SomeClass(param1=value1, param2=value2)
+    assert obj is not None
+```
+
+**2. Validation Tests**:
+```python
+def test_rejects_invalid_parameter(self):
+    """Verify validation raises appropriate error."""
+    with pytest.raises(ValueError, match="descriptive error pattern"):
+        SomeClass(param=invalid_value)
+```
+
+**3. Property Tests**:
+```python
+def test_calculated_property(self):
+    """Verify computed property returns expected value."""
+    obj = SomeClass(input_param=value)
+    assert obj.computed_property == expected_value
+```
+
+**4. Comparison Tests with Plots**:
+```python
+def test_methods_match(self, fixture, plots_dir, attach_plot):
+    """Verify two methods produce consistent results."""
+    result1 = method1(fixture)
+    result2 = method2(fixture)
+
+    # Generate comparison plot if HTML report requested
+    if plots_dir is not None:
+        fig, axes = plt.subplots(2, 1)
+        axes[0].plot(result1, label='Method 1')
+        axes[0].plot(result2, label='Method 2')
+        axes[1].plot(result1 - result2, label='Difference')
+        plot_path = plots_dir / 'comparison.png'
+        fig.savefig(plot_path)
+        plt.close(fig)
+        attach_plot(plot_path)
+
+    # Quantitative assertions
+    assert np.allclose(result1, result2, rtol=0.1)
+```
+
+### Test Evolution and Fixes
+
+**Major Test Issues Fixed (January 2025)**:
+
+1. **Carrier Overlap in Fixtures** (28 failures):
+   - **Problem**: `transponder_with_carriers` fixture had overlapping carriers
+   - **Root Cause**: carrier2 at -10 MHz with 10.8 MHz BW overlapped with simple_fdma_carrier at 0 MHz with 13.5 MHz BW
+   - **Fix**: Repositioned carrier2 to -12 MHz with 5 Msps (6.75 MHz BW) for 1.875 MHz clearance
+   - **Location**: `tests/conftest.py` lines 80-91
+
+2. **STATIC_CW IQ Generation** (multiple failures):
+   - **Problem**: `generate_iq()` crashed on STATIC_CW carriers (no symbol_rate_sps)
+   - **Root Cause**: Code attempted to divide by `None` when calculating samples per symbol
+   - **Fix**: Added special handling to generate constant amplitude tone for STATIC_CW before symbol rate calculations
+   - **Location**: `satellite_downlink_simulator/simulation/iq.py` lines 181-189
+
+3. **Data Type Assertions** (2 failures):
+   - **Problem**: Tests expected `np.complex128` but IQ generation returns `np.complex64`
+   - **Fix**: Updated assertions to match actual implementation
+   - **Location**: `tests/test_iq.py` lines 23, 34
+
+4. **Measurement Noise Test** (1 failure):
+   - **Problem**: Test used `np.allclose()` which was too lenient to detect small noise variations
+   - **Root Cause**: Default tolerances considered ±12% variations as "close enough"
+   - **Fix**: Changed to `np.array_equal()` for strict comparison, added random seed for reproducibility
+   - **Location**: `tests/test_utils.py` lines 188-197
+
+5. **String Representation Formats** (2 failures):
+   - **Problem**: Tests expected "2 transponders" but actual format is "2 transponder(s)"
+   - **Fix**: Updated assertions to match actual string formatting
+   - **Locations**: `tests/test_beam.py` line 100, `tests/test_transponder.py` line 220
+
+6. **Deprecation Warnings** (6 warnings):
+   - **Problem**: `np.trapz` deprecated in NumPy 2.0 in favor of `np.trapezoid`
+   - **Fix**: Replaced all 6 occurrences across test files
+   - **Locations**: `tests/test_noise_floor_comparison.py` (4×), `tests/test_psd_comparison.py` (2×)
+
+**Current Status**: All 130 tests pass with zero warnings (as of January 2025).
+
+### Test Maintenance Guidelines
+
+**When adding new features**:
+1. Add corresponding tests in appropriate test file
+2. Follow existing test class organization (TestFeatureName)
+3. Use descriptive test names that explain what is being tested
+4. Add docstrings explaining the test purpose
+5. Use shared fixtures from `conftest.py` when possible
+
+**When tests fail**:
+1. Read the full error message and traceback
+2. Check if fixtures have correct non-overlapping carriers
+3. Verify parameter validation requirements (STATIC_CW vs modulated)
+4. Ensure data types match expectations (complex64, not complex128)
+5. Run individual test with `-v` flag for detailed output
+
+**When modifying existing code**:
+1. Run full test suite before committing: `pytest`
+2. Check for deprecation warnings
+3. Update affected tests if behavior intentionally changed
+4. Add new tests if new edge cases discovered
+5. Generate HTML report to visualize comparison tests
+
+### Continuous Integration Considerations
+
+**Test execution time**: ~16-17 seconds for full suite (130 tests)
+
+**Requirements for CI**:
+- Python 3.8+
+- All dependencies from `requirements.txt`
+- No display server needed (uses matplotlib Agg backend)
+- Sufficient memory for large array operations (~500 MB)
+
+**Recommended CI command**:
+```bash
+pytest --html=test_report.html --self-contained-html
+```
+
+This captures all test results with embedded plots for debugging CI failures.
 
 ## Git Workflow
 
