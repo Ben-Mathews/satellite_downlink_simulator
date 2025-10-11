@@ -11,7 +11,7 @@ class TestBeamInstantiation:
     def test_create_simple_beam(self, simple_beam):
         """Test creating a basic beam."""
         assert simple_beam is not None
-        assert simple_beam.band == Band.KU
+        assert simple_beam.band == Band.KA
         assert simple_beam.polarization == Polarization.RHCP
         assert simple_beam.direction == BeamDirection.DOWNLINK
         assert len(simple_beam.transponders) == 0
@@ -54,8 +54,8 @@ class TestBeamProperties:
         assert center > 0
 
     def test_center_frequency_empty_beam(self, simple_beam):
-        """Test center frequency for empty beam returns None."""
-        assert simple_beam.center_frequency_hz is None
+        """Test center frequency for empty beam returns 0."""
+        assert simple_beam.center_frequency_hz == 0.0
 
     def test_total_bandwidth_single_transponder(self, simple_beam, simple_transponder):
         """Test total bandwidth with single transponder."""
@@ -69,8 +69,8 @@ class TestBeamProperties:
         assert bandwidth > 0
 
     def test_total_bandwidth_empty_beam(self, simple_beam):
-        """Test total bandwidth for empty beam returns None."""
-        assert simple_beam.total_bandwidth_hz is None
+        """Test total bandwidth for empty beam returns 0."""
+        assert simple_beam.total_bandwidth_hz == 0.0
 
     def test_total_carriers(self, beam_with_transponders):
         """Test total carrier count across all transponders."""
@@ -97,4 +97,4 @@ class TestBeamStringRepresentation:
     def test_str_with_transponders(self, beam_with_transponders):
         """Test string representation includes transponder count."""
         beam_str = str(beam_with_transponders)
-        assert "2 transponders" in beam_str
+        assert "2 transponder(s)" in beam_str

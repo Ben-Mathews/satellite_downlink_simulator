@@ -78,12 +78,13 @@ def transponder_with_carriers(simple_transponder, simple_fdma_carrier):
     simple_transponder.add_carrier(simple_fdma_carrier)
 
     # Add a second carrier that doesn't overlap
-    # simple_fdma_carrier is at 0 MHz with 13.5 MHz BW (±6.75 MHz)
-    # Place carrier2 at -10 MHz with 10.8 MHz BW (±5.4 MHz)
+    # simple_fdma_carrier is at 0 MHz with 13.5 MHz BW (±6.75 MHz): -6.75 to +6.75 MHz
+    # Place carrier2 at -12 MHz with 6.75 MHz BW (±3.375 MHz): -15.375 to -8.625 MHz
+    # Gap between carriers: -8.625 to -6.75 = 1.875 MHz clearance
     carrier2 = Carrier(
-        frequency_offset_hz=-10e6,
+        frequency_offset_hz=-12e6,
         cn_db=12.0,
-        symbol_rate_sps=8e6,
+        symbol_rate_sps=5e6,
         modulation=ModulationType.BPSK,
         carrier_type=CarrierType.FDMA,
         name="Carrier 2"

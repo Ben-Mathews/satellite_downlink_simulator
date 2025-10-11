@@ -178,7 +178,17 @@ def _generate_carrier_iq(
     np.ndarray
         Complex IQ samples for the carrier (at baseband)
     """
-    # Calculate samples per symbol
+    from ..objects.enums import ModulationType
+
+    # Handle STATIC_CW carriers (unmodulated continuous wave)
+    if carrier.modulation == ModulationType.STATIC_CW:
+        # For STATIC_CW, generate a constant complex tone with carrier power
+        carrier_power_watts = carrier.calculate_power_watts(transponder.noise_power_density_watts_per_hz)
+        amplitude = np.sqrt(carrier_power_watts)
+        # Return a constant amplitude complex signal (at baseband, no frequency offset yet)
+        return np.full(num_samples, amplitude + 0j, dtype=np.complex64)
+
+    # Calculate samples per symbol for modulated carriers
     samples_per_symbol = int(sample_rate_hz / carrier.symbol_rate_sps)
     if samples_per_symbol < 2:
         samples_per_symbol = 2

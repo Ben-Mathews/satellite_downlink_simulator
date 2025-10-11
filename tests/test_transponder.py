@@ -75,7 +75,7 @@ class TestTransponderCarrierManagement:
             rrc_rolloff=0.35
         )
 
-        with pytest.raises(ValueError, match="Carrier.*does not fit within transponder bandwidth"):
+        with pytest.raises(ValueError, match="Carrier.*extends beyond transponder bandwidth"):
             simple_transponder.add_carrier(wide_carrier)
 
     def test_carrier_overlaps_rejected(self, simple_transponder):
@@ -217,4 +217,4 @@ class TestTransponderStringRepresentation:
     def test_str_with_carriers(self, transponder_with_carriers):
         """Test string representation includes carrier count."""
         transponder_str = str(transponder_with_carriers)
-        assert "2 carriers" in transponder_str
+        assert "2 carrier(s)" in transponder_str

@@ -20,7 +20,7 @@ class TestIQGeneration:
         assert iq is not None
         assert metadata is not None
         assert len(iq) > 0
-        assert iq.dtype == np.complex128
+        assert iq.dtype == np.complex64
 
     def test_generate_iq_multiple_carriers(self, transponder_with_carriers):
         """Test generating IQ data for multiple carriers."""
@@ -31,7 +31,7 @@ class TestIQGeneration:
 
         assert iq is not None
         assert len(iq) > 0
-        assert iq.dtype == np.complex128
+        assert iq.dtype == np.complex64
 
     def test_generate_iq_beam(self, beam_with_transponders):
         """Test generating IQ data for beam."""

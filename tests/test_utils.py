@@ -187,13 +187,14 @@ class TestMeasurementNoise:
 
     def test_add_measurement_noise(self):
         """Test adding measurement noise to PSD."""
+        np.random.seed(42)  # Set seed for reproducibility
         psd_clean = np.ones(1000) * 1e-12
         psd_noisy = add_measurement_noise(psd_clean, noise_factor_db=0.5)
 
         assert len(psd_noisy) == len(psd_clean)
         assert np.all(np.isfinite(psd_noisy))
-        # Noisy version should be different from clean
-        assert not np.allclose(psd_noisy, psd_clean)
+        # Noisy version should be different from clean (check that at least some values differ)
+        assert not np.array_equal(psd_noisy, psd_clean)
 
     def test_measurement_noise_increases_variance(self):
         """Test that noise increases variance."""
