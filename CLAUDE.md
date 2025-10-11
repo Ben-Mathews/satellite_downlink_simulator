@@ -2,7 +2,7 @@
 
 This document provides critical context about the Satellite Downlink Simulator codebase to help future Claude sessions understand the design decisions, implementation details, and evolution of this project.
 
-**Last Updated**: January 2025 - Added comprehensive test suite documentation and test fix history
+**Last Updated**: October 2025 - Added SpectrumRecord JSON export feature for RF Pattern of Life application
 
 ## Project Overview
 
@@ -486,10 +486,12 @@ add_measurement_noise(linear_array, noise_std_db)
 - **attrs >= 21.0.0**: Class definitions with validation
 - **matplotlib >= 3.3.0**: Plotting (used in examples and RF Pattern of Life app)
 - **imageio[ffmpeg] >= 2.9.0**: Animated visualization export (GIF and MP4 formats)
+- **blosc2 >= 2.0.0**: PSD data compression for JSON export feature
 
 **Key Notes**:
 - `imageio[ffmpeg]` installs imageio with FFmpeg support for MP4 video encoding
 - FFmpeg enables H.264/MP4 output in addition to GIF format
+- `blosc2` provides fast compression for PSD arrays in SpectrumRecord JSON export
 - All signal processing for the core library (RRC filters, constellations) is implemented from scratch without external DSP libraries
 
 ## Future Enhancement Ideas
@@ -683,6 +685,205 @@ The `create_animated_spectrogram()` method generates animated visualizations sho
 - **MP4**: Smaller file size (~1-2 MB for 289 frames), better compression, requires FFmpeg/H.264 support
 - Usage: `viz.create_animated_spectrogram(output_format='mp4')` or `output_format='gif'`
 - MP4 encoding parameters: `codec='libx264'`, `quality=8` (high quality), `pixelformat='yuv420p'` (standard compatibility)
+
+### JSON Export Feature (SpectrumRecord)
+
+**Added**: October 2025
+
+The RF Pattern of Life application now supports exporting complete spectrum state to JSON format using the `SpectrumRecord` class. This enables full serialization and deserialization of PSD snapshots with all associated metadata.
+
+**New Class**: `SpectrumRecord` (`satellite_downlink_simulator/simulation/spectrum_record.py`)
+
+#### Key Components
+
+1. **SpectrumRecord**: Main class for storing PSD snapshots
+   - Stores: timestamp, center frequency, bandwidth, RBW, VBW, compressed PSD data
+   - Includes: Full beam/transponder/carrier hierarchy (only active objects at timestamp)
+   - Includes: Interferer records with sweep parameters and overlap tracking
+   - PSD compression: Uses blosc2 for efficient storage (typically 10-20× reduction)
+
+2. **InterfererRecord**: Tracks interferer state with sweep information
+   - Carrier object (STATIC_CW modulation)
+   - Time windows (start/end datetimes)
+   - Sweep parameters: rate (Hz/s), type (linear/sawtooth), start/end frequencies
+   - Current frequency and sweep percentage at this timestamp
+   - List of overlapping transponder names
+
+3. **CarrierRecord**: Wrapper for carriers with time window information
+   - Carrier object
+   - All scheduled time windows (uptime/downtime as datetime tuples)
+
+#### CLI Usage
+
+```bash
+cd apps/rf_pattern_of_life_example
+
+# Run with JSON export
+python main.py --export-json
+
+# Specify custom start datetime (ISO format)
+python main.py --export-json --start-datetime 2025-01-15T00:00:00
+```
+
+**New CLI Arguments**:
+- `--export-json`: Enable JSON export (default: disabled)
+- `--start-datetime`: Simulation start datetime in ISO format YYYY-MM-DDTHH:MM:SS (default: current time)
+
+**Output File**: `output/spectrum_records_YYYYMMDD-HHMMSS.json`
+
+#### JSON Structure
+
+Each JSON file contains an array of SpectrumRecord objects, one per PSD snapshot:
+
+```json
+[
+  {
+    "timestamp": "2025-01-15T00:00:00",
+    "cf_hz": 12308000000.0,
+    "bw_hz": 216000000.0,
+    "rbw_hz": 100000.0,
+    "vbw_hz": 1000.0,
+    "psd_compressed_base64": "...",
+    "psd_shape": [2166],
+    "beams": [
+      {
+        "band": "KA",
+        "polarization": "LHCP",
+        "direction": "DOWNLINK",
+        "name": "Simulated Beam",
+        "transponders": [
+          {
+            "center_frequency_hz": 12218000000.0,
+            "bandwidth_hz": 36000000.0,
+            "noise_power_density_watts_per_hz": 1e-15,
+            "noise_rolloff": 0.25,
+            "name": "Transponder_0",
+            "carriers": [
+              {
+                "carrier": {
+                  "frequency_offset_hz": 5000000.0,
+                  "cn_db": 15.0,
+                  "symbol_rate_sps": 10000000.0,
+                  "modulation": "QPSK",
+                  "carrier_type": "FDMA",
+                  "rrc_rolloff": 0.35,
+                  "standard": "NONE",
+                  "burst_time_s": null,
+                  "duty_cycle": null,
+                  "name": "Static_0_0"
+                },
+                "time_windows": []
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "interferers": [
+      {
+        "carrier": {
+          "frequency_offset_hz": 12000000.0,
+          "cn_db": 25.5,
+          "modulation": "STATIC_CW",
+          "carrier_type": "FDMA",
+          "symbol_rate_sps": null,
+          "rrc_rolloff": 0.35,
+          "standard": "NONE",
+          "burst_time_s": null,
+          "duty_cycle": null,
+          "name": "CW_Long_0"
+        },
+        "start_time": "2025-01-15T01:00:00",
+        "end_time": "2025-01-15T18:30:00",
+        "is_sweeping": true,
+        "current_frequency_hz": 12230000000.0,
+        "sweep_rate_hz_per_s": 2500000.0,
+        "sweep_type": "linear",
+        "sweep_start_freq_hz": 12218000000.0,
+        "sweep_end_freq_hz": 12254000000.0,
+        "sweep_percentage": 0.125,
+        "overlapping_transponders": ["Transponder_0"],
+        "time_windows": [
+          ["2025-01-15T01:00:00", "2025-01-15T18:30:00"]
+        ]
+      }
+    ]
+  }
+]
+```
+
+#### Implementation Details
+
+**Location**: `apps/rf_pattern_of_life_example/psd_simulator.py`
+
+The `_export_spectrum_records()` method:
+1. Iterates through each PSD snapshot
+2. Builds beam hierarchy with only active carriers at that timestamp
+3. Tracks interferers separately with:
+   - Current frequency (absolute Hz)
+   - Sweep percentage (0.0-1.0 through sweep cycle)
+   - List of transponders currently overlapped
+4. Compresses PSD data with blosc2
+5. Stores actual PSD array shape (important: may differ from calculated shape)
+6. Serializes to JSON with base64-encoded compressed PSD
+
+**Key Design Decisions**:
+
+1. **Active objects only**: Each record contains only carriers and interferers active at that specific timestamp, not the complete configuration
+2. **All time windows included**: Even though only active objects are stored, their full uptime/downtime schedules are preserved
+3. **Interferers stored separately**: Interferers aren't nested under transponders because sweeping interferers can span multiple transponders
+4. **Overlapping transponders tracked**: For each interferer, we store which transponders it currently overlaps based on its current frequency
+5. **Actual PSD shape stored**: The PSD array size is stored explicitly rather than calculated from bandwidth/RBW, as concatenated transponder PSDs may have gaps
+
+#### Loading and Using Exported Data
+
+```python
+from satellite_downlink_simulator.simulation import SpectrumRecord
+
+# Load from file
+records = SpectrumRecord.from_file('output/spectrum_records_20250115-000000.json')
+
+# Access first record
+record = records[0]
+print(f"Timestamp: {record.timestamp}")
+print(f"Center frequency: {record.cf_hz / 1e9:.3f} GHz")
+print(f"Number of beams: {len(record.beams)}")
+print(f"Number of interferers: {len(record.interferers)}")
+
+# Decompress PSD data
+psd_array = record.get_psd()
+print(f"PSD shape: {psd_array.shape}")
+print(f"PSD range: {psd_array.min():.1f} to {psd_array.max():.1f} dBm/Hz")
+
+# Access carriers
+for beam in record.beams:
+    for transponder in beam.transponders:
+        for carrier in transponder.carriers:
+            print(f"Carrier: {carrier.name}, Freq offset: {carrier.frequency_offset_hz/1e6:.1f} MHz")
+
+# Access interferers
+for interferer in record.interferers:
+    print(f"Interferer: {interferer.carrier.name}")
+    print(f"  Current freq: {interferer.current_frequency_hz/1e9:.6f} GHz")
+    print(f"  Sweeping: {interferer.is_sweeping}")
+    if interferer.is_sweeping:
+        print(f"  Sweep type: {interferer.sweep_type}")
+        print(f"  Sweep rate: {interferer.sweep_rate_hz_per_s/1e6:.1f} MHz/s")
+        print(f"  Progress: {interferer.sweep_percentage*100:.1f}%")
+    print(f"  Overlapping: {interferer.overlapping_transponders}")
+```
+
+#### Use Cases
+
+1. **ML Training Data**: Export realistic spectrum snapshots for training ML models
+2. **Post-Processing**: Analyze spectrum evolution offline without re-running simulation
+3. **Data Sharing**: Share complete spectrum state in portable format
+4. **Replay Analysis**: Reconstruct exact RF environment at any point in simulation
+5. **Integration Testing**: Provide test data for downstream processing systems
+
+#### Dependencies
+
+The JSON export feature requires `blosc2>=2.0.0` for PSD compression. This dependency is included in `setup.py`.
 
 ## Test Suite and Quality Assurance
 

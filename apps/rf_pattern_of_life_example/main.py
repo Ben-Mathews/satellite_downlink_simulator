@@ -7,6 +7,7 @@ import argparse
 import os
 import json
 from pathlib import Path
+from datetime import datetime
 
 from carrier_generator import CarrierGenerator
 from interferer_generator import InterfererGenerator
@@ -79,6 +80,10 @@ Examples:
                        help='Output directory for results (default: output)')
     parser.add_argument('--plot-dir', type=str, default='plots',
                        help='Plot directory (relative to output dir) (default: plots)')
+    parser.add_argument('--export-json', action='store_true',
+                       help='Export SpectrumRecord objects to JSON file')
+    parser.add_argument('--start-datetime', type=str, default=None,
+                       help='Simulation start datetime (ISO format YYYY-MM-DDTHH:MM:SS, default: current time)')
 
     args = parser.parse_args()
 
@@ -169,11 +174,25 @@ Examples:
     print("=" * 70)
     print()
 
+    # Parse start datetime
+    if args.start_datetime:
+        try:
+            start_datetime = datetime.fromisoformat(args.start_datetime)
+        except ValueError:
+            print(f"Error: Invalid datetime format '{args.start_datetime}'")
+            print(f"       Expected ISO format: YYYY-MM-DDTHH:MM:SS (e.g., 2025-01-15T00:00:00)")
+            return
+    else:
+        start_datetime = datetime.now()
+
     print(f"Simulation Parameters:")
+    print(f"  Start datetime: {start_datetime.isoformat()}")
     print(f"  Duration: {args.duration_min} minutes ({args.duration_min/60:.1f} hours)")
     print(f"  Snapshot interval: {args.interval_min} minutes")
     print(f"  Resolution bandwidth (RBW): {args.rbw_hz/1e3:.1f} kHz")
     print(f"  Video bandwidth (VBW): {args.vbw_hz/1e3:.1f} kHz")
+    if args.export_json:
+        print(f"  JSON export: ENABLED")
     print()
 
     simulator = PSDSimulator(
@@ -185,7 +204,9 @@ Examples:
 
     snapshots, metadata = simulator.run_simulation(
         duration_min=args.duration_min,
-        snapshot_interval_min=args.interval_min
+        snapshot_interval_min=args.interval_min,
+        start_datetime=start_datetime,
+        export_json=args.export_json
     )
 
     print()
@@ -250,6 +271,9 @@ Examples:
     print(f"  - simulation_metadata.json     (simulation parameters)")
     print(f"  - psd_snapshots.npz            (PSD time-series data)")
     print(f"  - activity_log.json            (carrier/interferer activity)")
+    if args.export_json:
+        json_filename = f"spectrum_records_{start_datetime.strftime('%Y%m%d-%H%M%S')}.json"
+        print(f"  - {json_filename:<30} (SpectrumRecord JSON export)")
     print(f"  - waterfall_plot.png           (spectrogram)")
     print(f"  - average_spectrum.png         (24-hour average)")
     print(f"  - snapshot_comparison.png      (selected time snapshots)")

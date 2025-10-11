@@ -4,11 +4,14 @@ Generates time-series PSD data with dynamic carriers and interferers.
 """
 
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass, asdict
 import json
+from datetime import datetime, timedelta
 
 from satellite_downlink_simulator import Transponder, Carrier, generate_psd, ModulationType, CarrierType
+from satellite_downlink_simulator.simulation import SpectrumRecord, InterfererRecord, CarrierRecord
+from satellite_downlink_simulator.objects import Beam, Band, Polarization, BeamDirection
 
 
 @dataclass
@@ -192,16 +195,22 @@ class PSDSimulator:
         return snapshot
 
     def run_simulation(self, duration_min: float = 1440,
-                      snapshot_interval_min: float = 5) -> Tuple[List[PSDSnapshot], SimulationMetadata]:
+                      snapshot_interval_min: float = 5,
+                      start_datetime: Optional[datetime] = None,
+                      export_json: bool = False) -> Tuple[List[PSDSnapshot], SimulationMetadata]:
         """Run complete 24-hour simulation.
 
         Args:
             duration_min: Total duration in minutes (default 1440 = 24 hours)
             snapshot_interval_min: Time between snapshots in minutes
+            start_datetime: Simulation start datetime (default: current time)
+            export_json: Whether to export SpectrumRecord objects to JSON
 
         Returns:
             Tuple of (list of PSDSnapshots, SimulationMetadata)
         """
+        if start_datetime is None:
+            start_datetime = datetime.now()
         print(f"\nRunning {duration_min/60:.1f}-hour simulation...")
         print(f"  Snapshot interval: {snapshot_interval_min:.1f} min")
 
@@ -249,7 +258,178 @@ class PSDSimulator:
             seed_interferers=42,  # From interferer generator
         )
 
+        # Export to JSON if requested
+        if export_json:
+            self._export_spectrum_records(snapshots, start_datetime, snapshot_interval_min)
+
         return snapshots, metadata
+
+    def _export_spectrum_records(self, snapshots: List[PSDSnapshot],
+                                 start_datetime: datetime,
+                                 snapshot_interval_min: float) -> None:
+        """Export snapshots as SpectrumRecord objects to JSON.
+
+        Args:
+            snapshots: List of PSDSnapshot objects
+            start_datetime: Simulation start datetime
+            snapshot_interval_min: Time between snapshots in minutes
+        """
+        print(f"\n  Exporting SpectrumRecord objects to JSON...")
+        import os
+        from pathlib import Path
+
+        spectrum_records = []
+
+        # Build carrier time window lookup (all time windows for each carrier)
+        carrier_time_windows = {}
+        for carrier_cfg in self.carrier_config.carriers:
+            if carrier_cfg.is_static:
+                # Static carriers have no time windows (always on)
+                carrier_time_windows[carrier_cfg.name] = []
+            else:
+                # Convert time windows from relative minutes to absolute datetimes
+                windows = [
+                    (start_datetime + timedelta(minutes=tw.start_min),
+                     start_datetime + timedelta(minutes=tw.end_min))
+                    for tw in carrier_cfg.time_windows
+                ]
+                carrier_time_windows[carrier_cfg.name] = windows
+
+        # Build interferer time window lookup
+        interferer_time_windows = {}
+        for interferer_cfg in self.interferer_configs:
+            windows = [(
+                start_datetime + timedelta(minutes=interferer_cfg.start_time_min),
+                start_datetime + timedelta(minutes=interferer_cfg.end_time_min)
+            )]
+            interferer_time_windows[interferer_cfg.name] = windows
+
+        for i, snapshot in enumerate(snapshots):
+            if i % 12 == 0:  # Progress every hour
+                print(f"    Processing snapshot {i+1}/{len(snapshots)}...")
+
+            snapshot_time = start_datetime + timedelta(minutes=snapshot.time_min)
+
+            # Populate transponders with active carriers at this time
+            self._populate_transponder_at_time(snapshot.time_min)
+
+            # Build beam with transponders containing only active carriers
+            beam = Beam(
+                band=Band.KA,  # Ku band (using KA as closest match)
+                polarization=Polarization.LHCP,
+                direction=BeamDirection.DOWNLINK,
+                name="Simulated Beam"
+            )
+
+            # Add transponders with their active carriers
+            for xpdr_idx, xpdr in enumerate(self.transponders):
+                if len(xpdr.carriers) > 0:  # Only include transponders with active carriers
+                    # Create a new transponder with only non-interferer carriers
+                    transponder_copy = Transponder(
+                        center_frequency_hz=xpdr.center_frequency_hz,
+                        bandwidth_hz=xpdr.bandwidth_hz,
+                        noise_power_density_watts_per_hz=xpdr.noise_power_density_watts_per_hz,
+                        noise_rolloff=xpdr.noise_rolloff,
+                        name=f"Transponder_{xpdr_idx}",
+                        allow_overlap=True
+                    )
+
+                    # Add only non-interferer carriers
+                    for carrier in xpdr.carriers:
+                        if not carrier.name.startswith('CW_'):
+                            transponder_copy.add_carrier(carrier)
+
+                    # Only add to beam if it has carriers
+                    if len(transponder_copy.carriers) > 0:
+                        beam.add_transponder(transponder_copy)
+
+            # Build interferer records for active interferers
+            interferer_records = []
+            for interferer_cfg in self.interferer_configs:
+                freq_offset = interferer_cfg.get_frequency_offset(snapshot.time_min)
+                if freq_offset is not None:  # Interferer is active
+                    # Calculate absolute frequency
+                    xpdr = self.transponders[interferer_cfg.transponder_idx]
+                    current_freq_hz = xpdr.center_frequency_hz + freq_offset
+
+                    # Create carrier object for this interferer
+                    interferer_carrier = Carrier(
+                        name=interferer_cfg.name,
+                        frequency_offset_hz=freq_offset,
+                        cn_db=interferer_cfg.cn_db,
+                        modulation=ModulationType.STATIC_CW,
+                        carrier_type=CarrierType.FDMA
+                    )
+
+                    # Calculate sweep percentage
+                    elapsed_min = snapshot.time_min - interferer_cfg.start_time_min
+                    duration_min = interferer_cfg.end_time_min - interferer_cfg.start_time_min
+                    sweep_percentage = elapsed_min / duration_min if duration_min > 0 else 0.0
+
+                    # Determine which transponders this interferer overlaps
+                    overlapping_transponders = []
+                    for other_xpdr_idx, other_xpdr in enumerate(self.transponders):
+                        lower_edge = other_xpdr.center_frequency_hz - other_xpdr.bandwidth_hz / 2
+                        upper_edge = other_xpdr.center_frequency_hz + other_xpdr.bandwidth_hz / 2
+                        if lower_edge <= current_freq_hz <= upper_edge:
+                            overlapping_transponders.append(f"Transponder_{other_xpdr_idx}")
+
+                    # Create interferer record
+                    interferer_record = InterfererRecord(
+                        carrier=interferer_carrier,
+                        start_time=start_datetime + timedelta(minutes=interferer_cfg.start_time_min),
+                        end_time=start_datetime + timedelta(minutes=interferer_cfg.end_time_min),
+                        is_sweeping=(interferer_cfg.sweep_type != 'none'),
+                        sweep_rate_hz_per_s=interferer_cfg.sweep_rate_hz_per_min / 60.0 if interferer_cfg.sweep_rate_hz_per_min else None,
+                        sweep_type=interferer_cfg.sweep_type if interferer_cfg.sweep_type != 'none' else None,
+                        sweep_start_freq_hz=xpdr.center_frequency_hz + interferer_cfg.target_frequency_offset_hz if interferer_cfg.target_frequency_offset_hz else None,
+                        sweep_end_freq_hz=(xpdr.center_frequency_hz + interferer_cfg.target_frequency_offset_hz +
+                                          interferer_cfg.sweep_range_hz) if interferer_cfg.sweep_range_hz else None,
+                        current_frequency_hz=current_freq_hz,
+                        sweep_percentage=sweep_percentage,
+                        overlapping_transponders=overlapping_transponders,
+                        time_windows=interferer_time_windows[interferer_cfg.name]
+                    )
+                    interferer_records.append(interferer_record)
+
+            # Compress PSD data
+            psd_compressed = SpectrumRecord.compress_psd(snapshot.psd_dbm_hz)
+
+            # Calculate total bandwidth and center frequency
+            # Use actual frequency range from snapshot, not calculated bandwidth
+            freq_min = snapshot.frequency_hz[0]
+            freq_max = snapshot.frequency_hz[-1]
+            actual_bw_hz = freq_max - freq_min
+            center_freq_hz = (freq_min + freq_max) / 2
+
+            # Create SpectrumRecord
+            record = SpectrumRecord(
+                timestamp=snapshot_time,
+                cf_hz=center_freq_hz,
+                bw_hz=actual_bw_hz,
+                rbw_hz=self.rbw_hz,
+                vbw_hz=self.vbw_hz,
+                psd_compressed=psd_compressed,
+                psd_shape=snapshot.psd_dbm_hz.shape,  # Store actual shape
+                beams=[beam] if len(beam.transponders) > 0 else [],
+                interferers=interferer_records
+            )
+            spectrum_records.append(record)
+
+        # Save to JSON file
+        script_dir = Path(__file__).parent
+        output_dir = script_dir / "output"
+        output_dir.mkdir(exist_ok=True)
+
+        json_filename = f"spectrum_records_{start_datetime.strftime('%Y%m%d-%H%M%S')}.json"
+        json_filepath = output_dir / json_filename
+
+        print(f"    Writing JSON to {json_filepath}...")
+        SpectrumRecord.to_file(spectrum_records, str(json_filepath))
+
+        # Calculate file size
+        file_size_mb = os.path.getsize(json_filepath) / 1e6
+        print(f"    JSON export complete: {len(spectrum_records)} records, {file_size_mb:.1f} MB")
 
     @staticmethod
     def save_results(snapshots: List[PSDSnapshot], metadata: SimulationMetadata,
