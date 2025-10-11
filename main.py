@@ -1,5 +1,5 @@
 """
-Examples and test cases for the Satellite Spectrum Emulator.
+Examples and test cases for the Satellite Downlink Simulator.
 
 This script demonstrates various capabilities of the simulator including:
 1. Single transponder with multiple FDMA carriers
@@ -555,7 +555,7 @@ def example5_modulation_comparison():
 def main():
     """Run all examples."""
     print("\n" + "#"*80)
-    print("# Satellite Spectrum Emulator - Examples and Test Cases")
+    print("# Satellite Downlink Simulator - Examples and Test Cases")
     print("#"*80)
 
     # Run examples

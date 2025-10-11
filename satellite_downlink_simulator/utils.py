@@ -172,39 +172,6 @@ def generate_constellation(modulation: ModulationType) -> np.ndarray:
     return constellation
 
 
-def apply_vbw_smoothing(psd: np.ndarray, rbw: float, vbw: float) -> np.ndarray:
-    """
-    Apply VBW (video bandwidth) smoothing to a PSD trace.
-
-    Parameters
-    ----------
-    psd : np.ndarray
-        PSD values (linear scale)
-    rbw : float
-        Resolution bandwidth in Hz
-    vbw : float
-        Video bandwidth in Hz
-
-    Returns
-    -------
-    np.ndarray
-        Smoothed PSD values
-    """
-    if vbw >= rbw:
-        # No smoothing needed
-        return psd
-
-    # Number of points to average (approximate)
-    # VBW acts like a moving average filter
-    num_avg = max(1, int(rbw / vbw))
-
-    # Apply moving average
-    kernel = np.ones(num_avg) / num_avg
-    smoothed = np.convolve(psd, kernel, mode='same')
-
-    return smoothed
-
-
 def watts_to_dbm(watts: float) -> float:
     """Convert power from Watts to dBm."""
     return 10 * np.log10(watts * 1000)

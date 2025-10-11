@@ -6,6 +6,10 @@ from .enums import CarrierType, ModulationType, CarrierStandard
 from ..utils import validate_positive, validate_range
 
 
+# Physical constants
+STATIC_CW_BANDWIDTH_HZ = 100.0  # Fixed bandwidth for STATIC_CW carriers (represents phase noise)
+
+
 @attrs.define
 class Carrier:
     """
@@ -119,7 +123,7 @@ class Carrier:
             Occupied bandwidth in Hz
         """
         if self.modulation == ModulationType.STATIC_CW:
-            return 100.0  # Fixed small bandwidth for unmodulated CW
+            return STATIC_CW_BANDWIDTH_HZ
         return self.symbol_rate_sps * (1 + self.rrc_rolloff)
 
     @property
