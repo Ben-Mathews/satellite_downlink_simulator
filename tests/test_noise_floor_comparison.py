@@ -137,8 +137,8 @@ class TestNoiseFloorComparison:
         psd_iq_interp_linear = 10 ** (psd_iq_interp / 10) / 1000
 
         # Integrate power
-        power_direct = np.trapz(psd_direct_linear, freq_direct)
-        power_iq = np.trapz(psd_iq_interp_linear, freq_direct)
+        power_direct = np.trapezoid(psd_direct_linear, freq_direct)
+        power_iq = np.trapezoid(psd_iq_interp_linear, freq_direct)
 
         # Expected power
         expected_power = simple_transponder.noise_power_density_watts_per_hz * simple_transponder.bandwidth_hz
@@ -351,8 +351,8 @@ class TestNoiseFloorComparison:
         psd_direct_linear = 10 ** (psd_direct / 10) / 1000
         psd_iq_interp_linear = 10 ** (psd_iq_interp / 10) / 1000
 
-        power_direct = np.trapz(psd_direct_linear, freq_direct)
-        power_iq = np.trapz(psd_iq_interp_linear, freq_direct)
+        power_direct = np.trapezoid(psd_direct_linear, freq_direct)
+        power_iq = np.trapezoid(psd_iq_interp_linear, freq_direct)
 
         power_ratio = power_iq / power_direct
 

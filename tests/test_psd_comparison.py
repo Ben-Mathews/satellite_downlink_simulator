@@ -418,8 +418,8 @@ class TestPSDComparison:
         psd_direct_linear = 10 ** (psd_direct / 10) / 1000  # dBm to W/Hz
         psd_iq_linear = 10 ** (psd_iq / 10) / 1000
 
-        power_direct = np.trapz(psd_direct_linear, freq_direct)
-        power_iq = np.trapz(psd_iq_linear, freq_iq)
+        power_direct = np.trapezoid(psd_direct_linear, freq_direct)
+        power_iq = np.trapezoid(psd_iq_linear, freq_iq)
 
         print(f"\n=== Integrated Power Comparison ===")
         print(f"Direct PSD integrated power: {power_direct:.6e} W")
