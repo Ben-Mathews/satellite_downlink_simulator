@@ -74,22 +74,25 @@ pip install matplotlib numpy
 
 ```
 rf_pattern_of_life_example/
-├── main.py                   # CLI orchestration script
-├── carrier_generator.py      # Carrier configuration generator
-├── interferer_generator.py   # CW interferer generator
-├── psd_simulator.py          # 24-hour PSD simulation engine
-├── visualization.py          # Plotting and visualization tools
-├── config.json               # Generated carrier configuration
-├── output/                   # Simulation results
+├── main.py                        # CLI orchestration script
+├── carrier_generator.py           # Carrier configuration generator
+├── interferer_generator.py        # CW interferer generator
+├── psd_simulator.py               # 24-hour PSD simulation engine
+├── visualization.py               # Plotting and visualization tools
+├── spectrum_records_utility.py    # Regenerate plots from JSON (NEW)
+├── config.json                    # Generated carrier configuration
+├── output/                        # Simulation results
 │   ├── simulation_metadata.json
 │   ├── psd_snapshots.npz
 │   ├── activity_log.json
-│   └── plots/                # Output plots
+│   ├── spectrum_records_*.json    # JSON export (optional)
+│   └── plots/                     # Output plots
 │       ├── waterfall_plot.png
 │       ├── average_spectrum.png
 │       ├── snapshot_comparison.png
-│       └── activity_timeline.png
-└── README.md                 # This file
+│       ├── activity_timeline.png
+│       └── animated_spectrogram.gif (or .mp4)
+└── README.md                      # This file
 ```
 
 ## Usage
@@ -153,6 +156,15 @@ python main.py --rbw 10000 --vbw 1000
 ```bash
 # Custom output directory
 python main.py --output-dir my_results --plot-dir my_plots
+
+# Export spectrum records to JSON
+python main.py --export-json
+
+# Specify custom start datetime (ISO format)
+python main.py --start-datetime 2025-01-15T00:00:00
+
+# Export with specific datetime
+python main.py --export-json --start-datetime 2025-01-15T12:00:00
 ```
 
 ### Complete Example
@@ -222,6 +234,116 @@ python main.py \
 - Time-series plot showing carrier and interferer counts
 - Visualizes pattern-of-life dynamics
 - Two subplots: carrier activity and interferer activity
+
+### JSON Export (Optional)
+
+**`spectrum_records_YYYYMMDD-HHMMSS.json`**
+- Complete spectrum state snapshots in JSON format
+- One record per PSD snapshot with full system state
+- Includes:
+  - Compressed PSD data (blosc2 compression, ~10-20× reduction)
+  - Active carriers at each timestamp (with time windows)
+  - Active interferers with sweep parameters
+  - Current frequency and sweep percentage for each interferer
+  - Overlapping transponder tracking for interferers
+  - All simulation parameters (RBW, VBW, frequency range)
+- Size: ~5-15 MB for 24-hour simulation (depends on activity)
+- Enables offline analysis and visualization replay
+
+**Generation:**
+```bash
+# Export JSON with default datetime (current time)
+python main.py --export-json
+
+# Export with specific start datetime
+python main.py --export-json --start-datetime 2025-01-15T00:00:00
+```
+
+**Use Cases:**
+- Post-processing and offline analysis
+- Machine learning training data
+- Data sharing in portable format
+- Replay analysis without re-running simulation
+- Integration testing for downstream systems
+
+## Regenerating Plots from JSON
+
+The `spectrum_records_utility.py` script allows you to regenerate all visualizations from an exported JSON file without re-running the full simulation. This is much faster and enables experimentation with different visualization parameters.
+
+### Usage
+
+```bash
+# Basic usage - regenerate all plots
+python spectrum_records_utility.py output/spectrum_records_20250115-000000.json
+
+# Specify custom output directory
+python spectrum_records_utility.py spectrum_records_20250115-000000.json --output-dir custom_plots
+
+# Skip animation (much faster - only generate static plots)
+python spectrum_records_utility.py spectrum_records_20250115-000000.json --no-animation
+
+# Generate MP4 instead of GIF
+python spectrum_records_utility.py spectrum_records_20250115-000000.json --format mp4
+
+# Use frame decimation for faster animation (every 5th frame)
+python spectrum_records_utility.py spectrum_records_20250115-000000.json --frame-decimation 5
+```
+
+### Command-Line Arguments
+
+- **json_file** (required): Path to spectrum_records JSON file
+- **--output-dir**: Output directory for plots (default: `plots/` in same directory as JSON file)
+- **--no-animation**: Skip animated spectrogram generation (much faster)
+- **--format {gif,mp4}**: Animation format (default: gif)
+- **--fps**: Animation frames per second (default: 15)
+- **--frame-decimation**: Use every Nth frame to reduce file size (default: 1 = no decimation)
+
+### What It Does
+
+1. Loads and parses the spectrum_records JSON file
+2. Decompresses all PSD arrays using blosc2
+3. Reconstructs time, frequency, and PSD arrays
+4. Builds activity log (carrier/interferer counts at each timestamp)
+5. Recreates metadata from JSON records
+6. Generates all visualization plots:
+   - Waterfall plot (spectrogram)
+   - Average spectrum with percentiles
+   - Snapshot comparison at interesting times
+   - Activity timeline
+   - Animated spectrogram (optional)
+
+### Performance
+
+- **Loading**: ~2-5 seconds for 289 records (~10 MB file)
+- **Static plots only (--no-animation)**: ~10-15 seconds
+- **With animation (no decimation)**: ~30-60 seconds for 289 frames
+- **With 10× decimation**: ~5-10 seconds for 29 frames
+- **Memory usage**: ~500 MB for 24-hour simulation
+
+### Example Workflow
+
+```bash
+# Step 1: Run simulation with JSON export
+python main.py --export-json --start-datetime 2025-01-15T00:00:00
+
+# Step 2: Quick preview without animation
+python spectrum_records_utility.py output/spectrum_records_20250115-000000.json --no-animation
+
+# Step 3: Generate MP4 with decimation for smaller file
+python spectrum_records_utility.py output/spectrum_records_20250115-000000.json \
+    --format mp4 --frame-decimation 5 --output-dir plots_mp4
+
+# Step 4: Generate high-quality GIF with all frames
+python spectrum_records_utility.py output/spectrum_records_20250115-000000.json \
+    --format gif --output-dir plots_gif
+```
+
+### Benefits
+
+- **Speed**: Regenerate plots in seconds vs. minutes for full simulation
+- **Experimentation**: Try different animation formats, decimation factors, output directories
+- **Portability**: Share JSON files with colleagues who can generate their own plots
+- **Storage**: Archive JSON files (~10 MB) instead of full NPZ data (~50 MB)
 
 ## Module Documentation
 
