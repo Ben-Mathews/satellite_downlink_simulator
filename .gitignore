@@ -206,3 +206,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Simulation output files
+apps/rf_pattern_of_life_example/output/
+apps/rf_pattern_of_life_example/plots/
+apps/rf_pattern_of_life_example/config.json
