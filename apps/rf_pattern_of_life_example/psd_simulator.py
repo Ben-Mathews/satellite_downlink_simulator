@@ -24,6 +24,7 @@ class PSDSnapshot:
     active_interferers: List[str]  # Names of active interferers
     num_carriers: int  # Total active carriers
     num_interferers: int  # Total active interferers
+    interferer_frequencies_hz: List[float]  # Absolute frequencies (Hz) of active interferers
 
 
 @dataclass
@@ -158,6 +159,14 @@ class PSDSimulator:
                              for c in xpdr.carriers
                              if c.name.startswith('CW_')]
 
+        # Collect interferer absolute frequencies (transponder center + offset)
+        interferer_frequencies = []
+        for xpdr in self.transponders:
+            for c in xpdr.carriers:
+                if c.name.startswith('CW_'):
+                    abs_freq_hz = xpdr.center_frequency_hz + c.frequency_offset_hz
+                    interferer_frequencies.append(abs_freq_hz)
+
         # Generate PSD for each transponder
         all_freq = []
         all_psd = []
@@ -189,7 +198,8 @@ class PSDSimulator:
             active_carriers=active_carriers,
             active_interferers=active_interferers,
             num_carriers=len(active_carriers),
-            num_interferers=len(active_interferers)
+            num_interferers=len(active_interferers),
+            interferer_frequencies_hz=interferer_frequencies
         )
 
         return snapshot

@@ -299,11 +299,12 @@ class Visualizer:
         return selected
 
     def create_animated_spectrogram(self, fps: int = 15, figsize: Tuple[float, float] = (19.2, 10.8),
-                                   frame_decimation: int = 1, output_format: str = 'gif'):
+                                   frame_decimation: int = 1, output_format: str = 'gif',
+                                   interferer_data: Optional[List[List[float]]] = None):
         """Create animated GIF or MP4 showing PSD evolution over time.
 
         Creates an animated visualization with:
-        - Top 1/3: Current PSD line plot
+        - Top 1/3: Current PSD line plot with translucent red spans for interferers
         - Bottom 2/3: Spectrogram with white line marking current time
 
         Args:
@@ -311,6 +312,9 @@ class Visualizer:
             figsize: Figure size in inches (width, height). Default (19.2, 10.8) = 1920x1080 at 100 DPI
             frame_decimation: Frame decimation factor. Use every Nth frame (default: 1, no decimation)
             output_format: Output format, either 'gif' or 'mp4' (default: 'gif')
+            interferer_data: Optional list of interferer frequencies (Hz) for each snapshot.
+                            Each entry is a list of frequencies where interferers are present.
+                            Example: [[12.2e9, 12.3e9], [12.2e9], ...]
         """
         # Validate output format
         output_format = output_format.lower()
@@ -369,6 +373,26 @@ class Visualizer:
                 ax_psd.grid(True, alpha=0.3, linestyle='--')
                 ax_psd.set_ylim(vmin - 5, vmax + 5)  # Fixed y-axis for consistency
 
+                # Overlay interferer spans if data provided
+                if interferer_data is not None and frame_idx < len(interferer_data):
+                    interferer_freqs = interferer_data[frame_idx]
+                    if interferer_freqs:
+                        # Calculate span width: make CW interferers visible (0.5% of bandwidth or 5 MHz minimum)
+                        total_bandwidth_ghz = self.frequency_ghz[-1] - self.frequency_ghz[0]
+                        span_width_ghz = max(0.005, total_bandwidth_ghz * 0.005)  # 5 MHz or 0.5% of BW
+
+                        for interferer_freq_hz in interferer_freqs:
+                            interferer_freq_ghz = interferer_freq_hz / 1e9
+                            # Draw translucent red span centered on interferer
+                            ax_psd.axvspan(
+                                interferer_freq_ghz - span_width_ghz / 2,
+                                interferer_freq_ghz + span_width_ghz / 2,
+                                color='red',
+                                alpha=0.3,
+                                linewidth=0,
+                                zorder=10
+                            )
+
                 # Bottom plot: Full spectrogram with current time marker
                 X, Y = np.meshgrid(self.frequency_ghz, self.time_hours)
                 im = ax_spec.pcolormesh(X, Y, self.psd_array, shading='auto',
@@ -415,11 +439,13 @@ class Visualizer:
         print(f"  File size: {file_size_mb:.1f} MB")
         print(f"  Duration: {len(frames)/fps:.1f} seconds")
 
-    def create_all_plots(self, activity_log: Optional[List] = None):
+    def create_all_plots(self, activity_log: Optional[List] = None,
+                        interferer_data: Optional[List[List[float]]] = None):
         """Create all standard plots.
 
         Args:
             activity_log: Activity log from simulation (optional)
+            interferer_data: Interferer frequency data for each snapshot (optional)
         """
         print(f"\n{'='*60}")
         print(f"Creating all visualizations...")
@@ -429,7 +455,7 @@ class Visualizer:
         self.create_average_spectrum()
         self.create_snapshot_comparison()
         self.create_activity_timeline(activity_log)
-        self.create_animated_spectrogram()
+        self.create_animated_spectrogram(interferer_data=interferer_data)
 
         print(f"\n{'='*60}")
         print(f"All visualizations complete!")

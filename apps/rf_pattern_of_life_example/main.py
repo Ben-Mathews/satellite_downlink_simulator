@@ -236,14 +236,16 @@ Examples:
     freq_arr = snapshots[0].frequency_hz
     psd_arr = np.array([s.psd_dbm_hz for s in snapshots])
 
-    # Create activity log
+    # Create activity log and extract interferer frequencies
     activity_log = []
+    interferer_data = []
     for s in snapshots:
         activity_log.append({
             'time_min': s.time_min,
             'num_carriers': s.num_carriers,
             'num_interferers': s.num_interferers
         })
+        interferer_data.append(s.interferer_frequencies_hz)
 
     # Create visualizer and generate plots
     viz = Visualizer(
@@ -254,7 +256,7 @@ Examples:
         output_dir=str(plot_dir)
     )
 
-    viz.create_all_plots(activity_log=activity_log)
+    viz.create_all_plots(activity_log=activity_log, interferer_data=interferer_data)
 
     print()
 

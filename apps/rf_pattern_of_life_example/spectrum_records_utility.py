@@ -46,7 +46,7 @@ def load_and_process_records(json_file: str) -> tuple:
         json_file: Path to spectrum_records JSON file
 
     Returns:
-        Tuple of (time_array, frequency_array, psd_array, metadata, activity_log)
+        Tuple of (time_array, frequency_array, psd_array, metadata, activity_log, interferer_data)
     """
     print(f"Loading spectrum records from: {json_file}")
 
@@ -97,9 +97,10 @@ def load_and_process_records(json_file: str) -> tuple:
     psd_array = np.array(psd_list)
     print(f"  PSD array shape: {psd_array.shape}")
 
-    # Create activity log
+    # Create activity log and extract interferer frequencies
     print("  Building activity log...")
     activity_log = []
+    interferer_data = []
     for record in records:
         # Count carriers across all beams/transponders
         num_carriers = 0
@@ -114,6 +115,10 @@ def load_and_process_records(json_file: str) -> tuple:
             'num_carriers': num_carriers,
             'num_interferers': num_interferers
         })
+
+        # Extract interferer frequencies (Hz)
+        interferer_freqs = [interferer.current_frequency_hz for interferer in record.interferers]
+        interferer_data.append(interferer_freqs)
 
     print(f"    Max carriers: {max(a['num_carriers'] for a in activity_log)}")
     print(f"    Max interferers: {max(a['num_interferers'] for a in activity_log)}")
@@ -196,7 +201,7 @@ def load_and_process_records(json_file: str) -> tuple:
     print(f"    Total carriers: {metadata.total_carriers}")
     print(f"    Total interferers: {metadata.total_interferers}")
 
-    return time_array, frequency_array, psd_array, metadata, activity_log
+    return time_array, frequency_array, psd_array, metadata, activity_log, interferer_data
 
 
 def main():
@@ -273,7 +278,7 @@ Examples:
 
     # Load and process records
     try:
-        time_array, frequency_array, psd_array, metadata, activity_log = load_and_process_records(str(json_path))
+        time_array, frequency_array, psd_array, metadata, activity_log, interferer_data = load_and_process_records(str(json_path))
     except Exception as e:
         print(f"\nERROR: Failed to load spectrum records: {e}")
         import traceback
@@ -308,7 +313,8 @@ Examples:
         viz.create_animated_spectrogram(
             fps=args.fps,
             frame_decimation=args.frame_decimation,
-            output_format=args.format
+            output_format=args.format,
+            interferer_data=interferer_data
         )
     else:
         print("\nSkipping animated spectrogram (--no-animation specified)")
