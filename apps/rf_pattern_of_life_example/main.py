@@ -55,9 +55,13 @@ Examples:
 
     # Interferer generation parameters
     parser.add_argument('--interferers-long', type=int, default=2,
-                       help='Number of long-duration interferers (default: 2)')
+                       help='Number of long-duration CW interferers (default: 2)')
     parser.add_argument('--interferers-short', type=int, default=8,
-                       help='Number of short-duration interferers (default: 8)')
+                       help='Number of short-duration CW interferers (default: 8)')
+    parser.add_argument('--interferers-long-modulated', type=int, default=0,
+                       help='Number of long-duration MODULATED interferers (default: 0)')
+    parser.add_argument('--interferers-short-modulated', type=int, default=0,
+                       help='Number of short-duration MODULATED interferers (default: 0)')
 
     # Simulation parameters
     parser.add_argument('--duration-min', type=float, default=1440,
@@ -148,9 +152,11 @@ Examples:
     print("=" * 70)
     print()
 
-    print(f"Generating CW interferers...")
-    print(f"  Long-duration interferers: {args.interferers_long}")
-    print(f"  Short-duration interferers: {args.interferers_short}")
+    print(f"Generating interferers...")
+    print(f"  Long-duration CW: {args.interferers_long}")
+    print(f"  Short-duration CW: {args.interferers_short}")
+    print(f"  Long-duration MODULATED: {args.interferers_long_modulated}")
+    print(f"  Short-duration MODULATED: {args.interferers_short_modulated}")
     print(f"  Random seed: {args.seed_interferers}")
     print()
 
@@ -158,14 +164,19 @@ Examples:
     interferers = interferer_gen.generate_interferers(
         carrier_configs=carrier_config.carriers,
         num_long_duration=args.interferers_long,
-        num_short_duration=args.interferers_short
+        num_short_duration=args.interferers_short,
+        num_long_modulated=args.interferers_long_modulated,
+        num_short_modulated=args.interferers_short_modulated
     )
 
     print()
     print(f"Interferer Summary:")
     print(f"  Total interferers: {len(interferers)}")
+    cw_interferers = [i for i in interferers if i.interferer_type == 'cw']
+    modulated_interferers = [i for i in interferers if i.interferer_type == 'modulated']
     sweeping = [i for i in interferers if i.sweep_type != 'none']
-    print(f"  Sweeping interferers: {len(sweeping)}")
+    print(f"  CW interferers: {len(cw_interferers)} ({len(sweeping)} sweeping)")
+    print(f"  MODULATED interferers: {len(modulated_interferers)} (all static)")
     print()
 
     # Step 3: Run PSD simulation
@@ -236,7 +247,7 @@ Examples:
     freq_arr = snapshots[0].frequency_hz
     psd_arr = np.array([s.psd_dbm_hz for s in snapshots])
 
-    # Create activity log and extract interferer frequencies
+    # Create activity log and extract interferer frequencies with bandwidths
     activity_log = []
     interferer_data = []
     for s in snapshots:
@@ -245,7 +256,8 @@ Examples:
             'num_carriers': s.num_carriers,
             'num_interferers': s.num_interferers
         })
-        interferer_data.append(s.interferer_frequencies_hz)
+        # Combine frequencies and bandwidths into list of tuples
+        interferer_data.append(list(zip(s.interferer_frequencies_hz, s.interferer_bandwidths_hz)))
 
     # Create visualizer and generate plots
     viz = Visualizer(

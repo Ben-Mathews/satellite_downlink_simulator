@@ -8,7 +8,8 @@ This application simulates a satellite beam with 6 contiguous Ku-band transponde
 
 - **Static carriers**: 5-15 carriers per transponder that are always present
 - **Dynamic carriers**: ~20 carriers that appear and disappear throughout the day
-- **CW interferers**: 1-5 active interferers at any time, some sweeping in frequency
+- **CW interferers**: Unmodulated tones that can sweep in frequency
+- **MODULATED interferers**: Modulated signals (BPSK, QPSK, QAM16, APSK16) with static frequencies
 - **Realistic traffic patterns**: Uneven carrier distribution, varied symbol rates and modulations
 
 ## Features
@@ -31,24 +32,56 @@ This application simulates a satellite beam with 6 contiguous Ku-band transponde
 
 ### Interferer Model
 
-**Long-Duration Interferers** (Hours)
+The simulator supports two types of interferers: **CW (Continuous Wave)** unmodulated tones and **MODULATED** signals.
+
+#### CW Interferers (Unmodulated Tones)
+
+**Long-Duration CW** (Hours)
 - 2-3 interferers active for 3-23 hours
 - Start 1 hour into simulation
 - C/N ratio: 15-30 dB (strong)
+- Bandwidth: 100 Hz (narrow tone)
 - 40% probability of frequency sweep (10-200 MHz/hr)
 - 80% probability of targeting existing carrier
 
-**Short-Duration Interferers** (Minutes)
+**Short-Duration CW** (Minutes)
 - 5-10 interferers active for 10 minutes to 3 hours
 - Start anytime after 1 hour
 - C/N ratio: 10-25 dB (moderate to strong)
+- Bandwidth: 100 Hz (narrow tone)
 - 30% probability of frequency sweep (50-500 MHz/hr)
 - 90% probability of targeting existing carrier
 
-**Sweep Types**
+**CW Sweep Types**
 - **None**: Static frequency
 - **Linear**: Continuous sweep in one direction
 - **Sawtooth**: Sweep up, reset, repeat
+
+#### MODULATED Interferers (Modulated Signals)
+
+**Long-Duration MODULATED** (Hours)
+- Configurable count (default: 0)
+- Active for 3-23 hours
+- Start 1 hour into simulation
+- C/N ratio: 15-30 dB (strong, boosted above target)
+- Modulation: Random selection of BPSK, QPSK, QAM16, APSK16
+- Symbol rate: 1-15 Msps
+- Bandwidth: symbol_rate × (1 + rolloff) [typically 1.2-20 MHz]
+- RRC rolloff: 0.20, 0.25, or 0.35
+- **Always static frequency** (no sweeping)
+- 80% probability of targeting existing carrier
+
+**Short-Duration MODULATED** (Minutes)
+- Configurable count (default: 0)
+- Active for 10 minutes to 3 hours
+- Start anytime after 1 hour
+- C/N ratio: 10-25 dB (moderate to strong, boosted above target)
+- Modulation: Random selection of BPSK, QPSK, QAM16, APSK16
+- Symbol rate: 1-10 Msps
+- Bandwidth: symbol_rate × (1 + rolloff) [typically 1.2-13.5 MHz]
+- RRC rolloff: 0.20, 0.25, or 0.35
+- **Always static frequency** (no sweeping)
+- 90% probability of targeting existing carrier
 
 ### Transponder Configuration
 
@@ -76,10 +109,10 @@ pip install matplotlib numpy
 rf_pattern_of_life_example/
 ├── main.py                        # CLI orchestration script
 ├── carrier_generator.py           # Carrier configuration generator
-├── interferer_generator.py        # CW interferer generator
+├── interferer_generator.py        # CW and MODULATED interferer generator
 ├── psd_simulator.py               # 24-hour PSD simulation engine
 ├── visualization.py               # Plotting and visualization tools
-├── spectrum_records_utility.py    # Regenerate plots from JSON (NEW)
+├── spectrum_records_utility.py    # Regenerate plots from JSON
 ├── config.json                    # Generated carrier configuration
 ├── output/                        # Simulation results
 │   ├── simulation_metadata.json
@@ -134,8 +167,15 @@ python main.py --seed-carriers 123
 #### Interferer Generation
 
 ```bash
-# Custom interferer counts
+# Custom CW interferer counts
 python main.py --interferers-long 3 --interferers-short 10
+
+# Add MODULATED interferers
+python main.py --interferers-long-modulated 2 --interferers-short-modulated 4
+
+# Mixed CW and MODULATED interferers
+python main.py --interferers-long 2 --interferers-short 5 \
+    --interferers-long-modulated 1 --interferers-short-modulated 3
 
 # Custom random seed
 python main.py --seed-interferers 456
@@ -170,14 +210,15 @@ python main.py --export-json --start-datetime 2025-01-15T12:00:00
 ### Complete Example
 
 ```bash
-# Full custom simulation
+# Full custom simulation with both CW and MODULATED interferers
 python main.py \
   --regenerate \
   --static-min 5 --static-max 12 \
   --dynamic 25 \
   --interferers-long 3 --interferers-short 12 \
-  --duration 1440 --interval 5 \
-  --rbw 10000 --vbw 1000 \
+  --interferers-long-modulated 2 --interferers-short-modulated 5 \
+  --duration-min 1440 --interval-min 5 \
+  --rbw-hz 100000 --vbw-hz 1000 \
   --seed-carriers 42 --seed-interferers 43 \
   --output-dir output --plot-dir plots
 ```
@@ -367,18 +408,30 @@ python spectrum_records_utility.py output/spectrum_records_20250115-000000.json 
 ### interferer_generator.py
 
 **Classes:**
+- `InterfererType`: Enum for interferer types (CW, MODULATED)
 - `SweepType`: Enum for sweep types (none, linear, sawtooth, random_walk)
-- `InterfererConfig`: CW interferer configuration
+- `InterfererConfig`: Interferer configuration (CW or MODULATED)
 - `InterfererGenerator`: Generates realistic interferers
 
 **Key Methods:**
-- `generate_interferers()`: Create long and short duration interferers
-- `get_frequency_offset()`: Calculate frequency at given time (handles sweeping)
+- `generate_interferers()`: Create long and short duration CW and MODULATED interferers
+  - Parameters: `num_long_duration`, `num_short_duration`, `num_long_modulated`, `num_short_modulated`
+- `get_frequency_offset()`: Calculate frequency at given time (handles sweeping for CW)
 - `count_active_interferers()`: Count active interferers at time point
+
+**Interferer Types:**
+- **CW**: Unmodulated tones with optional frequency sweeping
+  - Rendered as STATIC_CW carriers (100 Hz bandwidth)
+  - Can use any sweep type (none, linear, sawtooth)
+- **MODULATED**: Modulated signals with static frequencies
+  - Rendered as regular carriers (BPSK, QPSK, QAM16, APSK16)
+  - Always static (sweep_type = "none")
+  - Symbol rates: 1-15 Msps (long), 1-10 Msps (short)
 
 **Targeting:**
 - 80-90% of interferers target existing carriers
 - Offset placed within carrier bandwidth for maximum disruption
+- C/N boosted +5 to +15 dB above target for visibility
 
 ### psd_simulator.py
 
@@ -461,10 +514,19 @@ f(t) = f_base + phase × sweep_range
 
 Uses `satellite_downlink_simulator.generate_psd()`:
 - Frequency-domain calculation (no IQ generation)
-- RRC-shaped carrier spectra
+- RRC-shaped carrier spectra for modulated signals
 - Noise floor with realistic roll-off
-- STATIC_CW carriers rendered as narrow Gaussian peaks (100 Hz FWHM)
+- CW interferers rendered as narrow Gaussian peaks (100 Hz FWHM)
+- MODULATED interferers rendered as regular RRC-shaped carriers
 - Measurement noise scaled by VBW/RBW ratio
+
+### Visualization Highlighting
+
+The animated spectrogram highlights interferers with translucent red overlays:
+- **CW interferers** (100 Hz bandwidth): Highlighted with minimum 5 MHz span for visibility
+- **MODULATED interferers**: Highlighted with their actual bandwidth (symbol_rate × (1 + rolloff))
+- Highlighting adapts to interferer type automatically based on bandwidth
+- Makes interferers easy to identify in complex spectrum scenarios
 
 ## Customization
 
@@ -562,14 +624,24 @@ print(f"Peak activity at t={time[peak_idx]/60:.1f} hours")
 ### Compare Multiple Runs
 
 ```bash
-# Run 1: Default carriers
+# Run 1: Default carriers with CW interferers only
 python main.py --output-dir run1
 
 # Run 2: More dynamic carriers
 python main.py --regenerate --dynamic 40 --output-dir run2
 
-# Run 3: More interferers
+# Run 3: More CW interferers
 python main.py --interferers-long 5 --interferers-short 15 --output-dir run3
+
+# Run 4: MODULATED interferers only
+python main.py --interferers-long 0 --interferers-short 0 \
+    --interferers-long-modulated 3 --interferers-short-modulated 6 \
+    --output-dir run4
+
+# Run 5: Mixed CW and MODULATED interferers
+python main.py --interferers-long 2 --interferers-short 5 \
+    --interferers-long-modulated 2 --interferers-short-modulated 4 \
+    --output-dir run5
 ```
 
 ## References

@@ -1,12 +1,18 @@
-"""CW interferer generation for pattern-of-life simulation.
+"""Interferer generation for pattern-of-life simulation.
 
-Generates realistic CW interferers with time-varying activity and frequency sweeping.
+Generates realistic CW and modulated interferers with time-varying activity and frequency sweeping.
 """
 
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass, asdict
 from enum import Enum
+
+
+class InterfererType(Enum):
+    """Type of interferer signal."""
+    CW = "cw"  # Unmodulated continuous wave (STATIC_CW)
+    MODULATED = "modulated"  # Modulated carrier (BPSK, QPSK, etc.)
 
 
 class SweepType(Enum):
@@ -19,21 +25,27 @@ class SweepType(Enum):
 
 @dataclass
 class InterfererConfig:
-    """Configuration for a single CW interferer."""
+    """Configuration for a single interferer (CW or modulated)."""
     name: str
     transponder_idx: int  # Which transponder (0-5)
     start_time_min: float  # When interferer appears (minutes since start)
     end_time_min: float  # When interferer disappears
     cn_db: float  # C/N ratio in dB (relative to transponder noise)
+    interferer_type: str  # "cw" or "modulated"
 
     # Target carrier (optional - None means independent interferer)
     target_carrier_name: Optional[str]  # Name of carrier to interfere with
-    target_frequency_offset_hz: Optional[float]  # Base frequency of target
+    target_frequency_offset_hz: Optional[float]  # Base frequency of target (for CW) or center (for MODULATED)
 
-    # Frequency sweep parameters
+    # Frequency sweep parameters (applies to both CW and MODULATED)
     sweep_type: str  # "none", "linear", "sawtooth", "random_walk"
     sweep_rate_hz_per_min: float  # Sweep rate in Hz/min (0 for static)
     sweep_range_hz: float  # Total sweep range (for sawtooth)
+
+    # MODULATED interferer parameters (None for CW interferers)
+    carrier: Optional[Dict]  # Carrier parameters: modulation, symbol_rate_sps, rrc_rolloff
+                             # Set to None for CW interferers
+                             # Example: {"modulation": "QPSK", "symbol_rate_sps": 5e6, "rrc_rolloff": 0.35}
 
     def get_frequency_offset(self, time_min: float) -> float:
         """Calculate frequency offset at given time.
@@ -85,13 +97,16 @@ class InterfererGenerator:
         self.seed = seed
 
     def generate_interferers(self, carrier_configs: List, num_long_duration: int = 2,
-                            num_short_duration: int = 8) -> List[InterfererConfig]:
-        """Generate CW interferers targeting carriers.
+                            num_short_duration: int = 8, num_long_modulated: int = 0,
+                            num_short_modulated: int = 0) -> List[InterfererConfig]:
+        """Generate CW and MODULATED interferers targeting carriers.
 
         Args:
             carrier_configs: List of CarrierConfig objects to potentially target
-            num_long_duration: Number of long-duration interferers (hours)
-            num_short_duration: Number of short-duration interferers (minutes)
+            num_long_duration: Number of long-duration CW interferers (hours)
+            num_short_duration: Number of short-duration CW interferers (minutes)
+            num_long_modulated: Number of long-duration MODULATED interferers (hours, static only)
+            num_short_modulated: Number of short-duration MODULATED interferers (minutes, static only)
 
         Returns:
             List of InterfererConfig objects
@@ -181,11 +196,13 @@ class InterfererGenerator:
                 start_time_min=start_time_min,
                 end_time_min=end_time_min,
                 cn_db=round(cn_db, 1),
+                interferer_type=InterfererType.CW.value,
                 target_carrier_name=target_name,
                 target_frequency_offset_hz=target_freq,
                 sweep_type=sweep_type,
                 sweep_rate_hz_per_min=sweep_rate_hz_per_min,
                 sweep_range_hz=sweep_range_hz,
+                carrier=None,  # CW interferers have no carrier parameters
             )
             interferers.append(interferer)
 
@@ -269,20 +286,165 @@ class InterfererGenerator:
                 start_time_min=start_time_min,
                 end_time_min=end_time_min,
                 cn_db=round(cn_db, 1),
+                interferer_type=InterfererType.CW.value,
                 target_carrier_name=target_name,
                 target_frequency_offset_hz=target_freq,
                 sweep_type=sweep_type,
                 sweep_rate_hz_per_min=sweep_rate_hz_per_min,
                 sweep_range_hz=sweep_range_hz,
+                carrier=None,  # CW interferers have no carrier parameters
             )
             interferers.append(interferer)
 
-        print(f"  Created {num_short_duration} short-duration interferers")
+        print(f"  Created {num_short_duration} short-duration CW interferers")
+
+        # Generate long-duration MODULATED interferers (3-23 hours, static only)
+        if num_long_modulated > 0:
+            print(f"Generating {num_long_modulated} long-duration MODULATED interferers...")
+            for i in range(num_long_modulated):
+                # Start between 60-120 min
+                start_time_min = self.rng.uniform(60, 120)
+                # Duration: 3-23 hours
+                duration_min = self.rng.uniform(180, 1380)
+                end_time_min = min(start_time_min + duration_min, 1440)
+
+                # Round to 5-minute boundaries
+                start_time_min = round(start_time_min / 5) * 5
+                end_time_min = round(end_time_min / 5) * 5
+
+                # 80% chance to target a carrier, 20% chance independent
+                if self.rng.rand() < 0.8 and len(static_carriers) > 0:
+                    target_carrier = self.rng.choice(static_carriers)
+                    target_name = target_carrier.name
+                    target_freq = target_carrier.frequency_offset_hz
+                    xpdr_idx = target_carrier.transponder_idx
+
+                    # Offset near carrier (modulated interferers have wider bandwidth)
+                    # Position interferer to overlap with target carrier
+                    carrier_bw = target_carrier.symbol_rate_sps * (1 + target_carrier.rrc_rolloff)
+                    freq_offset_within_carrier = self.rng.uniform(-carrier_bw/2, carrier_bw/2)
+                    target_freq += freq_offset_within_carrier
+
+                    # Clamp to transponder bounds
+                    target_freq = np.clip(target_freq, -17.99e6, 17.99e6)
+
+                    # C/N: Set higher than target carrier (add 5-15 dB)
+                    cn_boost_db = self.rng.uniform(5.0, 15.0)
+                    cn_db = target_carrier.cn_db + cn_boost_db
+                else:
+                    # Independent interferer
+                    target_name = None
+                    xpdr_idx = self.rng.randint(0, 6)
+                    target_freq = self.rng.uniform(-16e6, 16e6)
+                    cn_db = self.rng.uniform(15.0, 30.0)
+
+                # Generate carrier parameters for MODULATED interferer
+                modulations = ['BPSK', 'QPSK', 'QAM16', 'APSK16']
+                modulation = self.rng.choice(modulations)
+
+                # Symbol rate: 1-15 Msps (rounded to 100 kHz)
+                symbol_rate_sps = round(self.rng.uniform(1e6, 15e6) / 1e5) * 1e5
+
+                # RRC rolloff: 0.20, 0.25, or 0.35
+                rrc_rolloff = self.rng.choice([0.20, 0.25, 0.35])
+
+                interferer = InterfererConfig(
+                    name=f"Modulated_Long_{i}",
+                    transponder_idx=xpdr_idx,
+                    start_time_min=start_time_min,
+                    end_time_min=end_time_min,
+                    cn_db=round(cn_db, 1),
+                    interferer_type=InterfererType.MODULATED.value,
+                    target_carrier_name=target_name,
+                    target_frequency_offset_hz=target_freq,
+                    sweep_type=SweepType.NONE.value,  # MODULATED interferers are always static
+                    sweep_rate_hz_per_min=0.0,
+                    sweep_range_hz=0.0,
+                    carrier={
+                        'modulation': modulation,
+                        'symbol_rate_sps': symbol_rate_sps,
+                        'rrc_rolloff': rrc_rolloff
+                    }
+                )
+                interferers.append(interferer)
+
+            print(f"  Created {num_long_modulated} long-duration MODULATED interferers")
+
+        # Generate short-duration MODULATED interferers (10 min - 3 hours, static only)
+        if num_short_modulated > 0:
+            print(f"Generating {num_short_modulated} short-duration MODULATED interferers...")
+            for i in range(num_short_modulated):
+                # Start anytime after 60 min
+                start_time_min = self.rng.uniform(60, 1200)
+                # Duration: 10 min - 3 hours
+                duration_min = self.rng.uniform(10, 180)
+                end_time_min = min(start_time_min + duration_min, 1440)
+
+                # Round to 5-minute boundaries
+                start_time_min = round(start_time_min / 5) * 5
+                end_time_min = round(end_time_min / 5) * 5
+
+                # 90% chance to target a carrier
+                if self.rng.rand() < 0.9 and len(carrier_configs) > 0:
+                    target_carrier = self.rng.choice(carrier_configs)
+                    target_name = target_carrier.name
+                    target_freq = target_carrier.frequency_offset_hz
+                    xpdr_idx = target_carrier.transponder_idx
+
+                    # Offset near carrier
+                    carrier_bw = target_carrier.symbol_rate_sps * (1 + target_carrier.rrc_rolloff)
+                    freq_offset_within_carrier = self.rng.uniform(-carrier_bw/2, carrier_bw/2)
+                    target_freq += freq_offset_within_carrier
+
+                    # Clamp to transponder bounds
+                    target_freq = np.clip(target_freq, -17.99e6, 17.99e6)
+
+                    # C/N: Set higher than target carrier (add 5-12 dB)
+                    cn_boost_db = self.rng.uniform(5.0, 12.0)
+                    cn_db = target_carrier.cn_db + cn_boost_db
+                else:
+                    # Independent interferer
+                    target_name = None
+                    xpdr_idx = self.rng.randint(0, 6)
+                    target_freq = self.rng.uniform(-16e6, 16e6)
+                    cn_db = self.rng.uniform(10.0, 25.0)
+
+                # Generate carrier parameters for MODULATED interferer
+                modulations = ['BPSK', 'QPSK', 'QAM16', 'APSK16']
+                modulation = self.rng.choice(modulations)
+
+                # Symbol rate: 1-10 Msps for short-duration (rounded to 100 kHz)
+                symbol_rate_sps = round(self.rng.uniform(1e6, 10e6) / 1e5) * 1e5
+
+                # RRC rolloff: 0.20, 0.25, or 0.35
+                rrc_rolloff = self.rng.choice([0.20, 0.25, 0.35])
+
+                interferer = InterfererConfig(
+                    name=f"Modulated_Short_{i}",
+                    transponder_idx=xpdr_idx,
+                    start_time_min=start_time_min,
+                    end_time_min=end_time_min,
+                    cn_db=round(cn_db, 1),
+                    interferer_type=InterfererType.MODULATED.value,
+                    target_carrier_name=target_name,
+                    target_frequency_offset_hz=target_freq,
+                    sweep_type=SweepType.NONE.value,  # MODULATED interferers are always static
+                    sweep_rate_hz_per_min=0.0,
+                    sweep_range_hz=0.0,
+                    carrier={
+                        'modulation': modulation,
+                        'symbol_rate_sps': symbol_rate_sps,
+                        'rrc_rolloff': rrc_rolloff
+                    }
+                )
+                interferers.append(interferer)
+
+            print(f"  Created {num_short_modulated} short-duration MODULATED interferers")
 
         # Sort by start time
         interferers = sorted(interferers, key=lambda x: x.start_time_min)
 
-        print(f"Total interferers: {len(interferers)}")
+        print(f"Total interferers: {len(interferers)} ({num_long_duration + num_short_duration} CW, {num_long_modulated + num_short_modulated} MODULATED)")
 
         return interferers
 

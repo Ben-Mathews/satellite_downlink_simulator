@@ -25,6 +25,7 @@ class PSDSnapshot:
     num_carriers: int  # Total active carriers
     num_interferers: int  # Total active interferers
     interferer_frequencies_hz: List[float]  # Absolute frequencies (Hz) of active interferers
+    interferer_bandwidths_hz: List[float]  # Bandwidth (Hz) for each interferer (for visualization)
 
 
 @dataclass
@@ -117,24 +118,45 @@ class PSDSimulator:
                 )
                 self.transponders[xpdr_idx].add_carrier(carrier)
 
-        # Add active interferers as STATIC_CW carriers
+        # Add active interferers (CW or MODULATED)
         # Interferers can overlap with carriers, so temporarily enable overlap
         for interferer_cfg in self.interferer_configs:
             freq_offset = interferer_cfg.get_frequency_offset(time_min)
             if freq_offset is not None:
                 xpdr_idx = interferer_cfg.transponder_idx
-                cw_carrier = Carrier(
-                    name=interferer_cfg.name,
-                    frequency_offset_hz=freq_offset,
-                    cn_db=interferer_cfg.cn_db,
-                    modulation=ModulationType.STATIC_CW,
-                    carrier_type=CarrierType.FDMA,
-                )
+
+                # Create appropriate carrier based on interferer type
+                if interferer_cfg.interferer_type == "cw":
+                    # CW interferer: unmodulated tone (STATIC_CW)
+                    interferer_carrier = Carrier(
+                        name=interferer_cfg.name,
+                        frequency_offset_hz=freq_offset,
+                        cn_db=interferer_cfg.cn_db,
+                        modulation=ModulationType.STATIC_CW,
+                        carrier_type=CarrierType.FDMA,
+                    )
+                elif interferer_cfg.interferer_type == "modulated":
+                    # MODULATED interferer: use carrier parameters
+                    if interferer_cfg.carrier is None:
+                        raise ValueError(f"MODULATED interferer {interferer_cfg.name} must have carrier parameters")
+
+                    interferer_carrier = Carrier(
+                        name=interferer_cfg.name,
+                        frequency_offset_hz=freq_offset,
+                        cn_db=interferer_cfg.cn_db,
+                        symbol_rate_sps=interferer_cfg.carrier['symbol_rate_sps'],
+                        modulation=ModulationType[interferer_cfg.carrier['modulation']],
+                        rrc_rolloff=interferer_cfg.carrier['rrc_rolloff'],
+                        carrier_type=CarrierType.FDMA,
+                    )
+                else:
+                    raise ValueError(f"Unknown interferer_type: {interferer_cfg.interferer_type}")
+
                 # Temporarily allow overlap for interferers
                 original_overlap_setting = self.transponders[xpdr_idx].allow_overlap
                 self.transponders[xpdr_idx].allow_overlap = True
                 try:
-                    self.transponders[xpdr_idx].add_carrier(cw_carrier)
+                    self.transponders[xpdr_idx].add_carrier(interferer_carrier)
                 finally:
                     # Restore original setting
                     self.transponders[xpdr_idx].allow_overlap = original_overlap_setting
@@ -151,21 +173,27 @@ class PSDSimulator:
         # Populate transponders with active carriers/interferers
         self._populate_transponder_at_time(time_min)
 
+        # Build set of interferer names for quick lookup
+        interferer_names = {cfg.name for cfg in self.interferer_configs}
+
         # Count active carriers and interferers
         active_carriers = [c.name for xpdr in self.transponders
                           for c in xpdr.carriers
-                          if not c.name.startswith('CW_')]
+                          if c.name not in interferer_names]
         active_interferers = [c.name for xpdr in self.transponders
                              for c in xpdr.carriers
-                             if c.name.startswith('CW_')]
+                             if c.name in interferer_names]
 
-        # Collect interferer absolute frequencies (transponder center + offset)
+        # Collect interferer absolute frequencies and bandwidths (transponder center + offset)
         interferer_frequencies = []
+        interferer_bandwidths = []
         for xpdr in self.transponders:
             for c in xpdr.carriers:
-                if c.name.startswith('CW_'):
+                if c.name in interferer_names:
                     abs_freq_hz = xpdr.center_frequency_hz + c.frequency_offset_hz
                     interferer_frequencies.append(abs_freq_hz)
+                    # Calculate bandwidth (CW has fixed 100 Hz, modulated has symbol_rate * (1 + rolloff))
+                    interferer_bandwidths.append(c.bandwidth_hz)
 
         # Generate PSD for each transponder
         all_freq = []
@@ -199,7 +227,8 @@ class PSDSimulator:
             active_interferers=active_interferers,
             num_carriers=len(active_carriers),
             num_interferers=len(active_interferers),
-            interferer_frequencies_hz=interferer_frequencies
+            interferer_frequencies_hz=interferer_frequencies,
+            interferer_bandwidths_hz=interferer_bandwidths
         )
 
         return snapshot
@@ -314,6 +343,9 @@ class PSDSimulator:
             )]
             interferer_time_windows[interferer_cfg.name] = windows
 
+        # Build set of interferer names for quick lookup
+        interferer_names = {cfg.name for cfg in self.interferer_configs}
+
         for i, snapshot in enumerate(snapshots):
             if i % 12 == 0:  # Progress every hour
                 print(f"    Processing snapshot {i+1}/{len(snapshots)}...")
@@ -346,7 +378,7 @@ class PSDSimulator:
 
                     # Add only non-interferer carriers
                     for carrier in xpdr.carriers:
-                        if not carrier.name.startswith('CW_'):
+                        if carrier.name not in interferer_names:
                             transponder_copy.add_carrier(carrier)
 
                     # Only add to beam if it has carriers
@@ -362,14 +394,27 @@ class PSDSimulator:
                     xpdr = self.transponders[interferer_cfg.transponder_idx]
                     current_freq_hz = xpdr.center_frequency_hz + freq_offset
 
-                    # Create carrier object for this interferer
-                    interferer_carrier = Carrier(
-                        name=interferer_cfg.name,
-                        frequency_offset_hz=freq_offset,
-                        cn_db=interferer_cfg.cn_db,
-                        modulation=ModulationType.STATIC_CW,
-                        carrier_type=CarrierType.FDMA
-                    )
+                    # Create carrier object for this interferer based on type
+                    if interferer_cfg.interferer_type == "cw":
+                        interferer_carrier = Carrier(
+                            name=interferer_cfg.name,
+                            frequency_offset_hz=freq_offset,
+                            cn_db=interferer_cfg.cn_db,
+                            modulation=ModulationType.STATIC_CW,
+                            carrier_type=CarrierType.FDMA
+                        )
+                    elif interferer_cfg.interferer_type == "modulated":
+                        interferer_carrier = Carrier(
+                            name=interferer_cfg.name,
+                            frequency_offset_hz=freq_offset,
+                            cn_db=interferer_cfg.cn_db,
+                            symbol_rate_sps=interferer_cfg.carrier['symbol_rate_sps'],
+                            modulation=ModulationType[interferer_cfg.carrier['modulation']],
+                            rrc_rolloff=interferer_cfg.carrier['rrc_rolloff'],
+                            carrier_type=CarrierType.FDMA
+                        )
+                    else:
+                        raise ValueError(f"Unknown interferer_type: {interferer_cfg.interferer_type}")
 
                     # Calculate sweep percentage
                     elapsed_min = snapshot.time_min - interferer_cfg.start_time_min

@@ -1,1310 +1,308 @@
-# CLAUDE.md - Context for Future Claude Sessions
+# CLAUDE.md - Satellite Downlink Simulator Context
 
-This document provides critical context about the Satellite Downlink Simulator codebase to help future Claude sessions understand the design decisions, implementation details, and evolution of this project.
-
-**Last Updated**: October 2025 - Added SpectrumRecord JSON export feature for RF Pattern of Life application
+**Last Updated**: October 2025 - MODULATED interferer support and SpectrumRecord JSON export
 
 ## Project Overview
 
-This is a Python library for modeling and simulating satellite communication systems. It provides:
+Python library for modeling and simulating satellite communication systems with:
+1. **Object Model**: Carrier, Transponder, Beam hierarchy
+2. **Signal Generation**: PSD (frequency domain) and IQ (time domain) synthesis
+3. **Applications**: RF Pattern of Life with 24-hour temporal simulations
 
-1. **Object Model**: Hierarchical representation of satellite downlinks using Carrier, Transponder, and Beam objects
-2. **Signal Generation**: Functions to produce realistic Power Spectral Density (PSD) and In-phase/Quadrature (IQ) data
-3. **Applications**: Example use cases demonstrating the library's capabilities
+**Core Library** (`satellite_downlink_simulator/`):
+- `objects/`: Carrier, Transponder, Beam classes with validation
+- `simulation/`: PSD and IQ generation (psd.py, iq.py)
+- `utils.py`: Signal processing (RRC filters, constellations, noise)
 
-### Core Library (`satellite_downlink_simulator/`)
+**Key Philosophy**: Objects represent physical RF architecture; simulation functions generate synthetic measurements
 
-The core library provides object-oriented abstractions for satellite communication systems:
+## Critical Design Decisions
 
-- **Objects** (`objects/`): Carrier, Transponder, Beam classes with physical parameter validation
-- **Simulation** (`simulation/`): PSD and IQ generation functions operating on these objects
-- **Utilities** (`utils.py`): Signal processing functions (RRC filters, constellations, noise, validation)
+### 1. C/N Power Specification
+**Location**: `satellite_downlink_simulator/objects/carrier.py:88-98`
 
-**Key Design Philosophy**:
-- Objects represent physical RF architecture (what exists in the satellite system)
-- Simulation functions generate synthetic measurements (what you'd see on test equipment)
-- Separation allows flexible composition: build any scenario, generate any measurement type
-
-### Example Applications (`apps/`)
-
-The library includes example applications demonstrating real-world use cases:
-
-**RF Pattern of Life** (`apps/rf_pattern_of_life_example/`): Simulates 24-hour temporal evolution of satellite spectrum with dynamic carriers and interferers. Demonstrates using the core library to model time-varying scenarios with visualization and analysis tools.
-
-**Primary Use Cases**:
-- Create synthetic satellite spectrum data for testing without actual satellite hardware
-- Model realistic multi-carrier scenarios for spectrum planning and analysis
-- Generate IQ samples for demodulator and signal processing algorithm development
-- Produce training data for machine learning applications in satellite communications
-- Visualize spectrum occupancy and interference scenarios
-
-## Key Design Decisions
-
-### 1. Carrier Power Specification Using C/N Instead of Absolute Power
-
-**Location**: `satellite_spectrum_emulator/carrier.py`
-
-**Important**: Carriers are specified using **Carrier-to-Noise ratio (C/N in dB)**, NOT absolute power in Watts.
-
-**Why**: In satellite communications, operators think in terms of C/N ratios rather than absolute power levels. This is more intuitive and matches industry practice.
-
-**Implementation**:
+Carriers use **C/N ratio (dB)**, NOT absolute power. Industry-standard approach where power is calculated from transponder noise density:
 ```python
-# carrier.py lines 88-98
-def calculate_power_watts(self, noise_power_density_watts_per_hz: float) -> float:
-    """Calculate carrier power from C/N and transponder noise density."""
-    noise_power_watts = noise_power_density_watts_per_hz * self.bandwidth_hz
-    cn_linear = 10 ** (self.cn_db / 10)
-    carrier_power_watts = cn_linear * noise_power_watts
-    return carrier_power_watts
+carrier_power_watts = (10^(cn_db/10)) × noise_power_watts
 ```
-
-**Historical Note**: This was changed from an earlier design that used absolute `power_watts`. The parameter was renamed from `carrier_to_noise_db` to `cn_db` for brevity.
 
 ### 2. VBW Controls Noise Variance, Not Smoothing
+**Location**: `satellite_downlink_simulator/simulation/psd.py:137-147`
 
-**Location**: `satellite_spectrum_emulator/generation.py` lines 137-147
+VBW affects capture time, which controls noise variance:
+- Capture Time ≈ RBW / VBW
+- Noise Std Dev = Base_Noise × √(VBW / RBW)
+- VBW < RBW → Less noise (longer integration)
+- VBW > RBW → More noise (shorter integration)
 
-**Critical Understanding**: Video Bandwidth (VBW) does NOT apply smoothing to the PSD trace. Instead, it controls the capture/integration time, which affects noise variance.
+### 3. Random Carrier Placement
+**Location**: `satellite_downlink_simulator/objects/transponder.py:148-291`
 
-**Physical Relationship**:
-```
-Capture Time ≈ RBW / VBW
-Noise Variance ∝ 1 / Capture_Time
-Noise Std Dev = Base_Noise × √(VBW / RBW)
-```
+`populate_with_random_carriers()` algorithm:
+1. Pick random center frequency (100 kHz increments, 20% edge margin)
+2. Calculate max symbol rate based on edge distances
+3. Pick random symbol rate (100 kHz increments)
+4. Pick random C/N and modulation
+5. Validate fit and no overlap
 
-**Implementation**:
-```python
-# generation.py lines 141-147
-if add_noise:
-    vbw_rbw_ratio = vbw_hz / rbw_hz
-    effective_noise_std_db = noise_factor_db * np.sqrt(vbw_rbw_ratio)
-    psd_linear = add_measurement_noise(psd_linear, effective_noise_std_db)
-```
+### 4. STATIC_CW Modulation Type
+**Location**: `satellite_downlink_simulator/objects/enums.py`, `objects/carrier.py`
 
-**What This Means**:
-- VBW = RBW: Standard noise level
-- VBW < RBW: Longer integration time → LESS noise on trace
-- VBW > RBW: Shorter integration time → MORE noise on trace
+Special modulation for unmodulated CW tones:
+- **No symbol_rate_sps** (must be None)
+- **Fixed 100 Hz bandwidth** (phase noise width)
+- **Gaussian PSD shape** instead of RRC-shaped
+- Used for beacons, frequency references, calibration
 
-**Historical Note**: An earlier implementation incorrectly used `apply_vbw_smoothing()` which was a smoothing filter. This was removed because VBW in a real spectrum analyzer doesn't smooth the signal—it controls integration time which affects noise statistics.
+### 5. Configurable Sample Rate
+**Location**: `satellite_downlink_simulator/simulation/iq.py:220-229`
 
-### 3. Random Carrier Placement Algorithm
+`generate_iq()` accepts optional `sample_rate_hz` parameter:
+- Default: 1.25× bandwidth
+- Must satisfy Nyquist (≥ bandwidth_hz)
+- Allows control of oversampling for different applications
 
-**Location**: `satellite_spectrum_emulator/transponder.py` lines 148-291
+## Key Implementation Details
 
-The `populate_with_random_carriers()` method implements a sophisticated algorithm for automatically placing non-overlapping carriers within a transponder.
+### PSD Generation (Frequency Domain)
+**Function**: `generate_psd()` in `simulation/psd.py:19-161`
 
-**Key Algorithm Steps** (see transponder.py lines 232-289):
+Fast approach that directly computes PSD without IQ generation:
+1. Create frequency array based on RBW
+2. Add shaped noise floor (RRC filtered)
+3. Add shaped carrier PSDs with normalization: `PSD = (P/SR) × |H_RRC(f)|²`
+4. Add measurement noise scaled by VBW/RBW
 
-1. **Pick random center frequency** (100 kHz increments)
-   - Must be within usable range (20% margin from edges by default)
-   - Line 234-235: `center_offset_hz = np.random.uniform(usable_lower, usable_upper)`
+### IQ Generation (Time Domain)
+**Function**: `generate_iq()` in `simulation/iq.py:164-287`
 
-2. **Calculate maximum symbol rate** based on edge distances
-   - Line 244-249: Considers distance to both lower and upper edges
-   - Accounts for RRC rolloff: `BW = SR × (1 + rolloff)`
+Generates actual modulated symbols:
+- Constellation symbols for each carrier
+- RRC pulse shaping in time domain
+- TDMA bursting via masking
+- Frequency shifting and summation
 
-3. **Pick random symbol rate** (100 kHz increments)
-   - Line 260-267: Uses discrete steps for realistic symbol rates
-
-4. **Pick random C/N and modulation**
-   - Line 238-240: Uniform distribution within specified ranges
-
-5. **Attempt to add carrier**
-   - Line 282: `self.add_carrier(carrier)` validates fit and overlap
-   - On failure, increment `iterations_without_success` and retry
-
-**Edge Margin**: Default is 20% (line 225), meaning carriers must stay 20% of transponder bandwidth away from edges. This was changed from 10% to reduce overlap failures.
-
-### 4. STATIC_CW Carrier Type for Unmodulated Tones
-
-**Location**: `satellite_downlink_simulator/objects/enums.py` and `objects/carrier.py`
-
-**What**: STATIC_CW is a special modulation type representing unmodulated continuous wave (CW) carriers - pure sinusoidal tones used for testing, beacons, or calibration.
-
-**Key Characteristics**:
-- **No symbol rate**: `symbol_rate_sps` must be `None` (validation enforced)
-- **Fixed bandwidth**: Returns 100 Hz (representing oscillator phase noise width)
-- **Gaussian PSD shape**: Rendered as narrow Gaussian peak instead of RRC-shaped spectrum
-- **Power specification**: Still uses C/N like other carriers
-
-**Implementation** (carrier.py):
-```python
-if self.modulation == ModulationType.STATIC_CW:
-    if self.symbol_rate_sps is not None:
-        raise ValueError("STATIC_CW carriers should not specify symbol_rate_sps")
-    return 100.0  # Fixed bandwidth in Hz
-```
-
-**PSD Generation** (simulation/psd.py):
-```python
-if carrier.modulation == ModulationType.STATIC_CW:
-    # Generate narrow Gaussian peak (100 Hz FWHM)
-    sigma_hz = 100.0 / (2 * np.sqrt(2 * np.log(2)))
-    carrier_shape = np.exp(-0.5 * (freq_rel_to_carrier / sigma_hz) ** 2)
-    # Normalize so integral equals carrier power
-    normalization = sigma_hz * np.sqrt(2 * np.pi)
-    carrier_psd = power_watts / normalization * carrier_shape
-```
-
-**Usage Example**:
-```python
-cw_carrier = Carrier(
-    name="Beacon",
-    frequency_offset_hz=5e6,
-    cn_db=20.0,
-    modulation=ModulationType.STATIC_CW,
-    carrier_type=CarrierType.FDMA,
-    # No symbol_rate_sps or rrc_rolloff needed
-)
-```
-
-**Why**: Satellite systems commonly use CW tones for frequency references, signal presence indication, and network synchronization. This carrier type allows realistic simulation of these signals.
-
-### 5. Configurable Sample Rate with Nyquist Validation
-
-**Location**: `satellite_downlink_simulator/generation.py` lines 220-229
-
-**Design**: The `generate_iq()` function accepts an optional `sample_rate_hz` parameter that allows users to override the default 1.25× bandwidth oversampling.
-
-**Why**: Different applications require different oversampling factors:
-- **Standard use**: 1.25× provides adequate headroom (default)
-- **High-fidelity analysis**: 2× or higher for better frequency domain resolution
-- **Efficient storage**: Minimal oversampling when file size matters
-- **Hardware testing**: Match specific ADC/DAC sample rates
-
-**Validation**:
-```python
-# generation.py lines 224-229
-if sample_rate_hz < bandwidth_hz:
-    raise ValueError(
-        f"sample_rate_hz must be >= bandwidth to satisfy Nyquist criterion. "
-        f"Minimum required: {bandwidth_hz:.2f} Hz, got: {sample_rate_hz:.2f} Hz"
-    )
-```
-
-**Trade-offs**:
-- Lower sample rates (closer to bandwidth): Smaller files, faster processing, but less frequency headroom
-- Higher sample rates: Better spectral clarity, easier filtering, but larger files and slower processing
-- Validation prevents aliasing by enforcing the Nyquist criterion
-
-## Important Implementation Details
-
-### Power Spectral Density (PSD) Generation
-
-**Function**: `generate_psd()` in `generation.py` lines 19-161
-
-**Fast Frequency-Domain Approach**: Does NOT generate IQ data. Instead, directly computes PSD in frequency domain.
-
-**Steps**:
-1. Create frequency array based on RBW (line 82-87)
-2. For each transponder:
-   - Add shaped noise floor using RRC filter (lines 106-110)
-   - For each carrier, add shaped carrier PSD (lines 113-135)
-3. Add measurement noise scaled by VBW/RBW (lines 137-147)
-4. Convert to dBm/Hz (line 150)
-
-**RRC Filter Normalization** (lines 129-132):
-```python
-# Power spectral density = power / symbol_rate * |H(f)|²
-# This normalization ensures ∫|H(f)|² df = symbol_rate
-carrier_psd = power_watts / carrier.symbol_rate_sps * (carrier_shape ** 2)
-```
-
-### IQ Data Generation
-
-**Function**: `generate_iq()` in `generation.py` lines 164-287
-
-**Real Time-Domain Approach**: Generates actual modulated symbols with pulse shaping.
-
-**Key Points**:
-- Sample rate = 1.25 × bandwidth (default, configurable via `sample_rate_hz` parameter)
-- Sample rate validation ensures Nyquist criterion is met (sample_rate >= bandwidth)
-- Each carrier gets actual constellation symbols (line 327-329)
-- RRC pulse shaping applied in time domain (lines 336-344)
-- TDMA bursting applied via masking (lines 361-367, 372-408)
-- All components frequency-shifted and summed (lines 258-276)
-
-**TDMA Bursting** (`_apply_tdma_bursting()` lines 372-408):
-- Creates periodic on/off mask
-- Frame period = burst_time / duty_cycle
-- Bursts start at frame boundaries
-- Guard time = frame_period - burst_time
-
-### Carrier Bandwidth Calculation
-
-**Location**: `carrier.py` lines 121-133
-
-```python
-@property
-def bandwidth_hz(self) -> float:
-    """Occupied bandwidth including RRC rolloff."""
-    return self.symbol_rate_sps * (1 + self.rrc_rolloff)
-```
-
-**Example**: 10 Msps with 0.35 rolloff = 13.5 MHz bandwidth
-
-### TDMA Average Power
-
-**Location**: `carrier.py` lines 135-145
-
-For TDMA carriers, average power is scaled by duty cycle:
-```python
-def calculate_average_power_watts(self, noise_power_density_watts_per_hz: float) -> float:
-    power_watts = self.calculate_power_watts(noise_power_density_watts_per_hz)
-    if self.carrier_type == CarrierType.TDMA and self.duty_cycle:
-        return power_watts * self.duty_cycle
-    return power_watts
-```
-
-This is used in PSD generation to show average power level (what you'd see on a spectrum analyzer).
-
-## File Structure and Responsibilities
+## File Structure
 
 ```
 satellite_downlink_simulator/
-├── objects/                    # Object definitions
-│   ├── __init__.py            # Exports all objects
-│   ├── carrier.py             # Carrier class - individual signals
-│   ├── transponder.py         # Transponder class - contains carriers
-│   ├── beam.py                # Beam class - contains transponders
-│   ├── metadata.py            # PSDMetadata and IQMetadata classes
-│   └── enums.py               # All enumerations (Band, Modulation, etc.)
-├── simulation/                 # Signal generation functions
-│   ├── __init__.py            # Exports generation functions
-│   ├── psd.py                 # PSD generation (frequency domain)
-│   └── iq.py                  # IQ generation (time domain)
-├── utils.py                    # Signal processing utilities (RRC, constellations, validation)
-└── __init__.py                 # Top-level exports (backward compatible)
-```
-
-**Note**: The top-level `__init__.py` re-exports all classes and functions for backward compatibility. Old code using imports like `from satellite_downlink_simulator.carrier import Carrier` will continue to work.
-
-### Key Classes
-
-**Carrier** (`carrier.py`):
-- Represents a single communication signal
-- Stores: frequency offset, C/N, symbol rate, modulation, carrier type
-- Calculates: power from C/N, bandwidth from symbol rate + rolloff
-
-**Transponder** (`transponder.py`):
-- Represents a satellite transponder containing multiple carriers
-- Stores: center frequency, bandwidth, noise density, carrier list
-- Validates: carriers fit within bandwidth, no overlaps (unless allowed)
-- Method: `populate_with_random_carriers()` for auto-generation
-
-**Beam** (`beam.py`):
-- Represents a satellite beam containing multiple transponders
-- Stores: band, polarization, direction, transponder list
-- Calculates: total bandwidth, center frequency, total carriers
-
-## Common Patterns and Conventions
-
-### Frequency Representation
-
-- **Carrier frequencies**: Relative to transponder center (offset in Hz)
-- **Transponder frequencies**: Absolute downlink frequencies (Hz)
-- **Beam center**: Calculated from min/max of all transponders
-
-### Validation Pattern
-
-Classes use `attrs` with validators and `__attrs_post_init__()`:
-
-```python
-@attrs.define
-class Transponder:
-    center_frequency_hz: float = attrs.field()
-
-    @center_frequency_hz.validator
-    def _validate_center_frequency_hz(self, attribute, value):
-        validate_positive(value, "center_frequency_hz")
-
-    def __attrs_post_init__(self):
-        self.validate_carriers()  # Additional validation after init
-```
-
-### Parameter Naming
-
-- `_hz` suffix: Frequency in Hertz
-- `_sps` suffix: Symbol rate in symbols per second
-- `_db` suffix: Value in decibels
-- `_s` suffix: Time in seconds
-- `_watts` or `_watts_per_hz`: Power values
-
-## Testing and Examples
-
-**Main Examples**: `main.py` contains 5 comprehensive examples:
-
-1. **example1_single_transponder_fdma()**: Basic FDMA carriers
-2. **example2_tdma_carrier()**: TDMA bursting demonstration
-3. **example3_multi_transponder_beam()**: 6 transponders with random carriers
-4. **example4_validation_tests()**: Error handling and validation
-5. **example5_modulation_comparison()**: All modulation types
-
-**Running Examples**:
-```bash
-python main.py
-```
-
-Generates 5 PNG plots demonstrating all features.
-
-## Evolution History
-
-### Major Changes Made During Development
-
-1. **Carrier Power Specification Change**:
-   - From: `power_watts` parameter
-   - To: `cn_db` parameter with power calculated from transponder noise density
-   - Reason: More intuitive for satellite communications
-
-2. **VBW Implementation Fix**:
-   - From: VBW used for trace smoothing via `apply_vbw_smoothing()`
-   - To: VBW controls noise variance via capture time relationship
-   - Reason: Match real spectrum analyzer behavior
-
-3. **Random Carrier Placement**:
-   - Added `populate_with_random_carriers()` method to Transponder
-   - Enables automatic generation of realistic multi-carrier scenarios
-   - Uses 20% edge margin (changed from 10% for better success rate)
-
-4. **Example 3 Modifications**:
-   - Initially tried 10 transponders (too slow for IQ generation)
-   - Reduced to 6 transponders (user modification)
-   - Skips IQ generation for large beams (only generates PSD)
-
-5. **Configurable Sample Rate for IQ Generation**:
-   - From: Hard-coded sample rate at 1.25× bandwidth
-   - To: Optional `sample_rate_hz` parameter with validation
-   - Default: Still 1.25× bandwidth when not specified
-   - Validation: Enforces Nyquist criterion (sample_rate >= bandwidth)
-   - Reason: Allows users to control oversampling factor for specific use cases while maintaining safe defaults
-
-6. **STATIC_CW Modulation Type**:
-   - Added: STATIC_CW to ModulationType enum for unmodulated carriers
-   - Carrier changes: Made `symbol_rate_sps` optional; STATIC_CW must NOT have it
-   - Bandwidth: STATIC_CW returns fixed 100 Hz (phase noise width)
-   - PSD rendering: Gaussian peak instead of RRC-shaped spectrum
-   - Reason: Enable simulation of beacon tones, frequency references, and calibration signals
-
-7. **Code Restructuring into objects/ and simulation/ subdirectories**:
-   - Reorganized: Split flat structure into logical subdirectories
-   - objects/: carrier.py, transponder.py, beam.py, metadata.py, enums.py
-   - simulation/: psd.py (was part of generation.py), iq.py (was part of generation.py)
-   - Backward compatibility: Top-level __init__.py re-exports everything
-   - Reason: Better code organization, clearer separation of concerns, easier to navigate
-
-## Potential Gotchas
-
-### 1. Transponder Noise Density Required for Carrier Power
-
-Carrier power cannot be calculated without knowing the transponder's noise power density. Always ensure carriers are added to a transponder before trying to calculate their absolute power.
-
-### 2. RBW Determines Number of Points
-
-```python
-num_points = int(span_hz / rbw_hz) + 1
-```
-
-Small RBW values create very large arrays. For a 216 MHz beam with 1 kHz RBW, you get 216,000 frequency points.
-
-### 3. Allow Overlap Flag
-
-By default, transponders reject overlapping carriers. Set `allow_overlap=True` if you need carriers to overlap (e.g., for interference scenarios).
-
-### 4. TDMA Parameter Validation
-
-TDMA carriers MUST have `burst_time_s` and `duty_cycle`. FDMA carriers MUST NOT have these parameters. Validation will raise `ValueError` if this is violated.
-
-### 5. Sample Rate Configuration
-
-**Default Behavior**: IQ generation automatically sets sample rate to 1.25× bandwidth if not specified.
-
-**Override**: You can specify a custom `sample_rate_hz` parameter in `generate_iq()`, but it MUST be >= bandwidth_hz to satisfy the Nyquist criterion. The function will raise a `ValueError` with a descriptive message if this validation fails.
-
-**Example**:
-```python
-# Use default 1.25× bandwidth
-iq_data, metadata = generate_iq(transponder, duration_s=0.01)
-
-# Use custom sample rate (2× bandwidth for extra headroom)
-iq_data, metadata = generate_iq(transponder, duration_s=0.01, sample_rate_hz=2.0 * transponder.bandwidth_hz)
-
-# This will raise ValueError (violates Nyquist criterion)
-iq_data, metadata = generate_iq(transponder, duration_s=0.01, sample_rate_hz=0.5 * transponder.bandwidth_hz)
-```
-
-### 6. STATIC_CW Parameter Requirements
-
-**STATIC_CW carriers have different parameter requirements than modulated carriers:**
-
-**MUST NOT specify**:
-- `symbol_rate_sps` - will raise ValueError if provided
-- `rrc_rolloff` - ignored (can be left at default, but has no effect)
-
-**MUST specify**:
-- `modulation=ModulationType.STATIC_CW`
-- `cn_db` - power level relative to noise
-- `carrier_type` - FDMA or TDMA
-- `frequency_offset_hz` - position within transponder
-
-**Modulated carriers (BPSK, QPSK, etc.) MUST specify `symbol_rate_sps`**, otherwise validation will raise ValueError.
-
-## Useful Utilities
-
-### RRC Filter Functions (`utils.py`)
-
-```python
-# Frequency-domain RRC response (for PSD generation)
-rrc_filter_freq(freq, symbol_rate, rolloff)
-
-# Time-domain RRC taps (for IQ filtering)
-rrc_filter_time(symbol_rate, rolloff, span=10, samples_per_symbol=8)
-```
-
-### Constellation Generation (`utils.py`)
-
-```python
-# Returns constellation points for a modulation type
-generate_constellation(ModulationType.QPSK)  # Returns array of complex symbols
-```
-
-### Measurement Noise (`utils.py`)
-
-```python
-# Adds multiplicative noise in dB
-add_measurement_noise(linear_array, noise_std_db)
-```
-
-## Dependencies and Requirements
-
-### Core Library Dependencies
-
-- **numpy >= 1.20.0**: All numerical operations and array processing
-- **scipy >= 1.7.0**: Required for certain signal processing operations
-- **attrs >= 21.0.0**: Class definitions with validation
-- **matplotlib >= 3.3.0**: Plotting (used in examples and RF Pattern of Life app)
-- **imageio[ffmpeg] >= 2.9.0**: Animated visualization export (GIF and MP4 formats)
-- **blosc2 >= 2.0.0**: PSD data compression for JSON export feature
-
-**Key Notes**:
-- `imageio[ffmpeg]` installs imageio with FFmpeg support for MP4 video encoding
-- FFmpeg enables H.264/MP4 output in addition to GIF format
-- `blosc2` provides fast compression for PSD arrays in SpectrumRecord JSON export
-- All signal processing for the core library (RRC filters, constellations) is implemented from scratch without external DSP libraries
-
-## Future Enhancement Ideas
-
-If extending this library, consider:
-
-1. **Phase noise modeling**: Add carrier phase noise
-2. **Frequency errors**: Carrier frequency offset simulation
-3. **Non-linear effects**: TWTA saturation, intermodulation
-4. **Variable symbol rates**: Time-varying symbol rate carriers
-5. **Custom constellations**: User-defined constellation points
-6. **Polarization effects**: Cross-pol interference
-7. **Multi-beam interference**: Overlapping beam scenarios
-8. **Rain fade**: Atmospheric attenuation modeling
-
-## Key Equations Reference
-
-### Carrier Power from C/N
-```
-P_carrier = N₀ × BW × 10^(C/N_dB / 10)
-```
-
-### RRC Bandwidth
-```
-BW = Symbol_Rate × (1 + Rolloff)
-```
-
-### TDMA Timing
-```
-Frame_Period = Burst_Time / Duty_Cycle
-Guard_Time = Frame_Period - Burst_Time
-```
-
-### VBW and Noise
-```
-Capture_Time = RBW / VBW
-Noise_StdDev = Base_Noise × √(VBW / RBW)
-```
-
-### PSD Normalization
-```
-PSD(f) = (P / SR) × |H_RRC(f)|²
-
-where ∫|H_RRC(f)|² df = SR (symbol rate)
-```
-
-## Debug Tips
-
-### Visualizing Carrier Placement
-
-```python
-transponder = Transponder(...)
-num_created = transponder.populate_with_random_carriers(num_carriers=10, seed=42)
-print(f"Created {num_created}/10 carriers")
-
-for carrier in transponder.carriers:
-    lower = carrier.frequency_offset_hz - carrier.bandwidth_hz/2
-    upper = carrier.frequency_offset_hz + carrier.bandwidth_hz/2
-    print(f"{carrier.name}: [{lower/1e6:.3f}, {upper/1e6:.3f}] MHz")
-```
-
-### Checking Power Levels
-
-```python
-for carrier in transponder.carriers:
-    power_w = carrier.calculate_power_watts(transponder.noise_power_density_watts_per_hz)
-    power_dbm = 10 * np.log10(power_w * 1000)
-    print(f"{carrier.name}: C/N={carrier.cn_db} dB, Power={power_dbm:.1f} dBm")
-```
-
-### Verifying PSD Integration
-
-To check if PSD integrates to correct power:
-```python
-freq, psd_dbm_hz, meta = generate_psd(transponder, rbw_hz=1e3, vbw_hz=1e3)
-psd_linear = 10 ** (psd_dbm_hz / 10) / 1000  # Convert dBm/Hz to W/Hz
-total_power = np.trapz(psd_linear, freq)
-print(f"Total integrated power: {total_power:.6e} W")
-```
-
-## Parameter Recommendations
-
-### For Realistic Simulations
-
-```python
-# Transponder
-bandwidth_hz = 36e6  # 36 MHz (typical Ku-band)
-noise_power_density_watts_per_hz = 1e-15  # -120 dBm/Hz noise floor
-
-# Carrier
-cn_db = 10.0 to 25.0  # Typical operating range
-symbol_rate_sps = 1e6 to 30e6  # 1 to 30 Msps
-rrc_rolloff = 0.20 to 0.35  # Standard satellite values
-
-# PSD Generation
-rbw_hz = 10e3  # 10 kHz (good balance of resolution and speed)
-vbw_hz = rbw_hz / 10  # 10:1 ratio for smooth traces
-
-# IQ Generation
-duration_s = 0.001 to 0.01  # 1-10 ms (sufficient for most analysis)
-sample_rate_hz = None  # Use default 1.25× bandwidth, or specify custom rate
-# For high-fidelity: sample_rate_hz = 2.0 * bandwidth_hz
-# For hardware matching: sample_rate_hz = <your_adc_sample_rate>
+├── objects/          # Carrier, Transponder, Beam, metadata, enums
+├── simulation/       # psd.py, iq.py, spectrum_record.py
+├── utils.py          # Signal processing utilities
+└── __init__.py       # Top-level exports (backward compatible)
+
+apps/rf_pattern_of_life_example/
+├── main.py                      # CLI orchestration
+├── carrier_generator.py         # Static/dynamic carrier configs
+├── interferer_generator.py      # CW and MODULATED interferers
+├── psd_simulator.py             # Temporal PSD simulation
+├── visualization.py             # Waterfall, timeline, animated plots
+├── spectrum_records_utility.py  # Regenerate plots from JSON
+└── config.json                  # Example configuration
 ```
 
 ## RF Pattern of Life Application
-
 **Location**: `apps/rf_pattern_of_life_example/`
 
-This application demonstrates using the core library to simulate temporal evolution of satellite spectrum over 24 hours, with time-varying carrier activity and interferers.
+Simulates 24-hour spectrum evolution with:
+- **Static carriers**: Always-on with optional time windows
+- **Dynamic TDMA carriers**: Bursting with duty cycles
+- **CW interferers**: Unmodulated tones (100 Hz bandwidth) with optional frequency sweeping
+  - Long-duration: 3-23 hours, 80% target carriers, C/N boost +5-15 dB
+  - Short-duration: 10 min-3 hours, 90% target carriers, C/N boost +5-12 dB
+  - Sweep types: None, linear, sawtooth
+- **MODULATED interferers**: Modulated signals (BPSK, QPSK, QAM16, APSK16) with static frequencies
+  - Long-duration: 3-23 hours, 80% target carriers, C/N boost +5-15 dB, symbol rates 1-15 Msps
+  - Short-duration: 10 min-3 hours, 90% target carriers, C/N boost +5-12 dB, symbol rates 1-10 Msps
+  - Always static frequency (no sweeping)
+  - Bandwidth: symbol_rate × (1 + rolloff) [typically 1.2-20 MHz]
 
-### Application Architecture
+**CLI Arguments**:
+- `--duration-min`: Simulation duration (default: 1440 = 24 hours)
+- `--interval-min`: Snapshot interval (default: 5)
+- `--rbw-hz`: Resolution bandwidth (default: 100000 Hz)
+- `--vbw-hz`: Video bandwidth (default: 1000 Hz)
+- `--interferers-long`: Number of long-duration CW interferers (default: 2)
+- `--interferers-short`: Number of short-duration CW interferers (default: 8)
+- `--interferers-long-modulated`: Number of long-duration MODULATED interferers (default: 0)
+- `--interferers-short-modulated`: Number of short-duration MODULATED interferers (default: 0)
+- `--export-json`: Enable JSON export
+- `--start-datetime`: Start time (ISO format)
 
-- **main.py**: CLI orchestration with argparse for simulation parameters
-- **carrier_generator.py**: Generates static and dynamic carrier configurations with time windows
-- **interferer_generator.py**: Creates CW interferers (STATIC_CW carriers) with sweeping behavior
-- **psd_simulator.py**: Manages temporal simulation, generating PSD snapshots at regular intervals
-- **visualization.py**: Creates plots (waterfall, activity timeline, snapshots, animated GIF)
-- **config.json**: Example configuration file for carrier/interferer parameters
+**Output Files**:
+- `psd_snapshots.npz`: Compressed numpy arrays
+- `simulation_metadata.json`: Parameters and statistics
+- `activity_log.json`: Carrier/interferer counts per snapshot
+- `plots/*.png`: Waterfall, activity timeline, snapshots, average spectrum
+- `plots/animated_spectrogram.{gif,mp4}`: Animated evolution with interferer highlighting
 
-### Key Features
+**Visualization Highlighting**:
+- Animated spectrogram highlights interferers with translucent red overlays
+- CW interferers (100 Hz bandwidth): Minimum 5 MHz span for visibility
+- MODULATED interferers: Actual bandwidth based on symbol_rate × (1 + rolloff)
+- Highlighting adapts automatically based on interferer bandwidth
 
-1. **Static Carriers**: Always-on carriers with optional time windows for activity periods
-2. **Dynamic TDMA Carriers**: Bursting carriers with duty cycles
-3. **Long-Duration Interferers**: Hours-long CW tones, often targeting specific carriers
-4. **Short-Duration Interferers**: Minutes-long CW tones with faster sweeps
-5. **Frequency Sweeping**: Linear and sawtooth sweep patterns for interferers
-6. **Visualization Suite**: Waterfall plots, activity timelines, snapshot comparisons, animated GIFs
-
-### CLI Arguments (with unit suffixes)
-
-All time, frequency, and power arguments include unit suffixes for clarity:
-- `--duration-min`: Simulation duration in minutes (default: 1440 = 24 hours)
-- `--interval-min`: Snapshot interval in minutes (default: 5)
-- `--rbw-hz`: Resolution bandwidth in Hz (default: 100000 = 100 kHz)
-- `--vbw-hz`: Video bandwidth in Hz (default: 1000 = 1 kHz)
-
-### Interferer Generation Strategy
-
-Interferers are implemented as STATIC_CW carriers with boosted C/N to ensure visibility:
-
-**Long-Duration Interferers** (3-23 hours):
-- 80% chance to target a static carrier
-- C/N boost: +5 to +15 dB above target carrier
-- 40% chance to sweep (10-200 MHz/hr)
-- Frequency positioned within or near target carrier bandwidth
-
-**Short-Duration Interferers** (10 min - 3 hours):
-- 90% chance to target any carrier (static or dynamic)
-- C/N boost: +5 to +12 dB above target carrier
-- 30% chance to sweep (50-500 MHz/hr)
-- More aggressive sweep rates for short durations
-
-**C/N Boosting Logic**: Critical for interferer visibility. Interferers must have higher C/N than their target carriers to appear prominently in PSD plots. The boost ensures interferers create noticeable spectral features.
-
-### Animated Spectrogram
-
-The `create_animated_spectrogram()` method generates animated visualizations showing temporal evolution:
-- Top 1/3: Current PSD line plot
-- Bottom 2/3: Full 24-hour spectrogram with white line marking current time
-- Configurable parameters:
-  - `figsize`: Resolution in inches (default: 19.2x10.8 = 1920x1080 at 100 DPI)
-  - `frame_decimation`: Skip frames to reduce file size (default: 1 = no decimation)
-  - `fps`: Frames per second (default: 15)
-  - `output_format`: File format - 'gif' or 'mp4' (default: 'gif')
-- Uses imageio[ffmpeg] library with matplotlib Agg backend for headless rendering
-- MP4 encoding uses H.264 codec (libx264) with high quality settings for compatibility
-
-### Output Files
-
-- `psd_snapshots.npz`: Compressed numpy arrays (time, frequency, PSD)
-- `simulation_metadata.json`: Simulation parameters and statistics
-- `activity_log.json`: Carrier/interferer counts at each snapshot
-- `plots/waterfall_plot.png`: 24-hour spectrogram
-- `plots/activity_timeline.png`: Carrier and interferer activity over time
-- `plots/snapshot_comparison.png`: PSD at selected interesting times
-- `plots/average_spectrum.png`: Mean spectrum with percentiles
-- `plots/animated_spectrogram.gif`: Animated GIF evolution (if created with format='gif')
-- `plots/animated_spectrogram.mp4`: Animated MP4 evolution (if created with format='mp4')
-
-### Implementation Notes
-
-**STATIC_CW Rendering**: Interferers use the STATIC_CW modulation type, which renders as impulses (delta functions) in the PSD. Power is concentrated in a single frequency bin: `PSD = power_watts / 100 Hz`. This creates sharp spectral lines characteristic of CW tones.
-
-**Overlap Handling**: Interferers are added with `allow_overlap=True` temporarily enabled, since they intentionally overlap with existing carriers (that's the point of interference).
-
-**Time Windows**: Static carriers can have activity windows (start/end times) to simulate scheduled communications or temporary outages.
-
-**Output Format Selection**: The animated spectrogram can be exported as either GIF or MP4:
-- **GIF**: Larger file size (~8-10 MB for 289 frames), universal compatibility, no codec dependencies
-- **MP4**: Smaller file size (~1-2 MB for 289 frames), better compression, requires FFmpeg/H.264 support
-- Usage: `viz.create_animated_spectrogram(output_format='mp4')` or `output_format='gif'`
-- MP4 encoding parameters: `codec='libx264'`, `quality=8` (high quality), `pixelformat='yuv420p'` (standard compatibility)
-
-### JSON Export Feature (SpectrumRecord)
-
+### JSON Export (SpectrumRecord)
 **Added**: October 2025
 
-The RF Pattern of Life application now supports exporting complete spectrum state to JSON format using the `SpectrumRecord` class. This enables full serialization and deserialization of PSD snapshots with all associated metadata.
+Exports complete spectrum state with:
+- **SpectrumRecord**: Timestamp, CF, BW, RBW, VBW, compressed PSD, beam hierarchy
+- **InterfererRecord**: Sweep parameters, current frequency, overlap tracking
+- **blosc2 compression**: Typically 10-20× reduction
 
-**New Class**: `SpectrumRecord` (`satellite_downlink_simulator/simulation/spectrum_record.py`)
+**Use Cases**: ML training data, post-processing, data sharing, replay analysis
 
-#### Key Components
-
-1. **SpectrumRecord**: Main class for storing PSD snapshots
-   - Stores: timestamp, center frequency, bandwidth, RBW, VBW, compressed PSD data
-   - Includes: Full beam/transponder/carrier hierarchy (only active objects at timestamp)
-   - Includes: Interferer records with sweep parameters and overlap tracking
-   - PSD compression: Uses blosc2 for efficient storage (typically 10-20× reduction)
-
-2. **InterfererRecord**: Tracks interferer state with sweep information
-   - Carrier object (STATIC_CW modulation)
-   - Time windows (start/end datetimes)
-   - Sweep parameters: rate (Hz/s), type (linear/sawtooth), start/end frequencies
-   - Current frequency and sweep percentage at this timestamp
-   - List of overlapping transponder names
-
-3. **CarrierRecord**: Wrapper for carriers with time window information
-   - Carrier object
-   - All scheduled time windows (uptime/downtime as datetime tuples)
-
-#### CLI Usage
-
-```bash
-cd apps/rf_pattern_of_life_example
-
-# Run with JSON export
-python main.py --export-json
-
-# Specify custom start datetime (ISO format)
-python main.py --export-json --start-datetime 2025-01-15T00:00:00
-```
-
-**New CLI Arguments**:
-- `--export-json`: Enable JSON export (default: disabled)
-- `--start-datetime`: Simulation start datetime in ISO format YYYY-MM-DDTHH:MM:SS (default: current time)
-
-**Output File**: `output/spectrum_records_YYYYMMDD-HHMMSS.json`
-
-#### JSON Structure
-
-Each JSON file contains an array of SpectrumRecord objects, one per PSD snapshot:
-
-```json
-[
-  {
-    "timestamp": "2025-01-15T00:00:00",
-    "cf_hz": 12308000000.0,
-    "bw_hz": 216000000.0,
-    "rbw_hz": 100000.0,
-    "vbw_hz": 1000.0,
-    "psd_compressed_base64": "...",
-    "psd_shape": [2166],
-    "beams": [
-      {
-        "band": "KA",
-        "polarization": "LHCP",
-        "direction": "DOWNLINK",
-        "name": "Simulated Beam",
-        "transponders": [
-          {
-            "center_frequency_hz": 12218000000.0,
-            "bandwidth_hz": 36000000.0,
-            "noise_power_density_watts_per_hz": 1e-15,
-            "noise_rolloff": 0.25,
-            "name": "Transponder_0",
-            "carriers": [
-              {
-                "carrier": {
-                  "frequency_offset_hz": 5000000.0,
-                  "cn_db": 15.0,
-                  "symbol_rate_sps": 10000000.0,
-                  "modulation": "QPSK",
-                  "carrier_type": "FDMA",
-                  "rrc_rolloff": 0.35,
-                  "standard": "NONE",
-                  "burst_time_s": null,
-                  "duty_cycle": null,
-                  "name": "Static_0_0"
-                },
-                "time_windows": []
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    "interferers": [
-      {
-        "carrier": {
-          "frequency_offset_hz": 12000000.0,
-          "cn_db": 25.5,
-          "modulation": "STATIC_CW",
-          "carrier_type": "FDMA",
-          "symbol_rate_sps": null,
-          "rrc_rolloff": 0.35,
-          "standard": "NONE",
-          "burst_time_s": null,
-          "duty_cycle": null,
-          "name": "CW_Long_0"
-        },
-        "start_time": "2025-01-15T01:00:00",
-        "end_time": "2025-01-15T18:30:00",
-        "is_sweeping": true,
-        "current_frequency_hz": 12230000000.0,
-        "sweep_rate_hz_per_s": 2500000.0,
-        "sweep_type": "linear",
-        "sweep_start_freq_hz": 12218000000.0,
-        "sweep_end_freq_hz": 12254000000.0,
-        "sweep_percentage": 0.125,
-        "overlapping_transponders": ["Transponder_0"],
-        "time_windows": [
-          ["2025-01-15T01:00:00", "2025-01-15T18:30:00"]
-        ]
-      }
-    ]
-  }
-]
-```
-
-#### Implementation Details
-
-**Location**: `apps/rf_pattern_of_life_example/psd_simulator.py`
-
-The `_export_spectrum_records()` method:
-1. Iterates through each PSD snapshot
-2. Builds beam hierarchy with only active carriers at that timestamp
-3. Tracks interferers separately with:
-   - Current frequency (absolute Hz)
-   - Sweep percentage (0.0-1.0 through sweep cycle)
-   - List of transponders currently overlapped
-4. Compresses PSD data with blosc2
-5. Stores actual PSD array shape (important: may differ from calculated shape)
-6. Serializes to JSON with base64-encoded compressed PSD
-
-**Key Design Decisions**:
-
-1. **Active objects only**: Each record contains only carriers and interferers active at that specific timestamp, not the complete configuration
-2. **All time windows included**: Even though only active objects are stored, their full uptime/downtime schedules are preserved
-3. **Interferers stored separately**: Interferers aren't nested under transponders because sweeping interferers can span multiple transponders
-4. **Overlapping transponders tracked**: For each interferer, we store which transponders it currently overlaps based on its current frequency
-5. **Actual PSD shape stored**: The PSD array size is stored explicitly rather than calculated from bandwidth/RBW, as concatenated transponder PSDs may have gaps
-
-#### Loading and Using Exported Data
-
+**Loading**:
 ```python
 from satellite_downlink_simulator.simulation import SpectrumRecord
-
-# Load from file
-records = SpectrumRecord.from_file('output/spectrum_records_20250115-000000.json')
-
-# Access first record
-record = records[0]
-print(f"Timestamp: {record.timestamp}")
-print(f"Center frequency: {record.cf_hz / 1e9:.3f} GHz")
-print(f"Number of beams: {len(record.beams)}")
-print(f"Number of interferers: {len(record.interferers)}")
-
-# Decompress PSD data
-psd_array = record.get_psd()
-print(f"PSD shape: {psd_array.shape}")
-print(f"PSD range: {psd_array.min():.1f} to {psd_array.max():.1f} dBm/Hz")
-
-# Access carriers
-for beam in record.beams:
-    for transponder in beam.transponders:
-        for carrier in transponder.carriers:
-            print(f"Carrier: {carrier.name}, Freq offset: {carrier.frequency_offset_hz/1e6:.1f} MHz")
-
-# Access interferers
-for interferer in record.interferers:
-    print(f"Interferer: {interferer.carrier.name}")
-    print(f"  Current freq: {interferer.current_frequency_hz/1e9:.6f} GHz")
-    print(f"  Sweeping: {interferer.is_sweeping}")
-    if interferer.is_sweeping:
-        print(f"  Sweep type: {interferer.sweep_type}")
-        print(f"  Sweep rate: {interferer.sweep_rate_hz_per_s/1e6:.1f} MHz/s")
-        print(f"  Progress: {interferer.sweep_percentage*100:.1f}%")
-    print(f"  Overlapping: {interferer.overlapping_transponders}")
+records = SpectrumRecord.from_file('output/spectrum_records_*.json')
+psd_array = records[0].get_psd()  # Decompress
 ```
 
-#### Use Cases
-
-1. **ML Training Data**: Export realistic spectrum snapshots for training ML models
-2. **Post-Processing**: Analyze spectrum evolution offline without re-running simulation
-3. **Data Sharing**: Share complete spectrum state in portable format
-4. **Replay Analysis**: Reconstruct exact RF environment at any point in simulation
-5. **Integration Testing**: Provide test data for downstream processing systems
-
-#### Dependencies
-
-The JSON export feature requires `blosc2>=2.0.0` for PSD compression. This dependency is included in `setup.py`.
-
-### Spectrum Records Utility (spectrum_records_utility.py)
-
-**Added**: October 2025
-
-A utility script for regenerating visualizations from exported `spectrum_records_*.json` files without re-running the full simulation. This enables offline analysis and visualization of previously captured spectrum data.
-
+### Spectrum Records Utility
 **Location**: `apps/rf_pattern_of_life_example/spectrum_records_utility.py`
 
-#### Purpose
+Regenerates visualizations from exported JSON without re-running simulation.
 
-The utility reads a JSON file exported by the RF Pattern of Life application and regenerates all the same plots that would be created during `main.py` execution:
-- Waterfall plot (spectrogram)
-- Average spectrum with percentiles
-- Snapshot comparison at interesting times
-- Activity timeline (carriers and interferers over time)
-- Animated spectrogram (optional, GIF or MP4)
+**Usage**: `python spectrum_records_utility.py <json_file> [--no-animation] [--format mp4]`
 
-#### Usage
+## Testing
+**Location**: `tests/` (130 tests, ~16s execution)
 
+**Structure**: test_carrier.py (22), test_transponder.py (12), test_beam.py (14), test_psd.py (12), test_iq.py (13), test_utils.py (27), comparison tests (8)
+
+**Key Tests**:
+- Object validation (STATIC_CW vs modulated requirements)
+- Signal generation (PSD, IQ, TDMA bursting)
+- **Critical**: PSD vs IQ-FFT comparison validates frequency/time domain equivalence
+
+**Running Tests**:
 ```bash
-cd apps/rf_pattern_of_life_example
-
-# Basic usage - regenerate all plots
-python spectrum_records_utility.py output/spectrum_records_20250115-000000.json
-
-# Specify custom output directory
-python spectrum_records_utility.py spectrum_records_20250115-000000.json --output-dir custom_plots
-
-# Skip animation (faster)
-python spectrum_records_utility.py spectrum_records_20250115-000000.json --no-animation
-
-# Generate MP4 instead of GIF
-python spectrum_records_utility.py spectrum_records_20250115-000000.json --format mp4
-
-# Control animation parameters
-python spectrum_records_utility.py spectrum_records_20250115-000000.json \
-    --format gif --fps 15 --frame-decimation 5
+pytest                              # Basic run
+pytest --html=test_report.html      # With embedded plots
+pytest -v tests/test_carrier.py     # Specific file
 ```
 
-#### Command-Line Arguments
+**Shared Fixtures** (`tests/conftest.py`):
+- `simple_transponder`: 36 MHz at 12.5 GHz
+- `simple_fdma_carrier`: 10 Msps QPSK
+- `transponder_with_carriers`: 2 non-overlapping carriers (carefully positioned)
 
-- **json_file** (required): Path to spectrum_records JSON file
-- **--output-dir**: Output directory for plots (default: `plots/` in same directory as JSON file)
-- **--no-animation**: Skip animated spectrogram generation (much faster)
-- **--format**: Animation format - 'gif' or 'mp4' (default: 'gif')
-- **--fps**: Animation frames per second (default: 15)
-- **--frame-decimation**: Use every Nth frame (default: 1 = no decimation)
+**Current Status**: All 130 tests pass, zero warnings (January 2025)
 
-#### How It Works
+## Common Patterns
 
-1. **Load JSON**: Reads and parses the spectrum_records JSON file
-2. **Decompress PSD Data**: Decompresses all PSD arrays using blosc2
-3. **Reconstruct Arrays**: Builds time, frequency, and PSD arrays for visualization
-4. **Build Activity Log**: Counts carriers and interferers at each snapshot
-5. **Reconstruct Metadata**: Extracts simulation parameters from records
-6. **Create Visualizer**: Instantiates Visualizer class with reconstructed data
-7. **Generate Plots**: Calls same plotting methods as main.py
+**Frequency Representation**:
+- Carrier: Offset from transponder center (Hz)
+- Transponder: Absolute downlink frequency (Hz)
+- Beam: Calculated from min/max transponders
 
-#### Implementation Details
-
-**Data Extraction**:
-- Timestamps converted to minutes from start time
-- Frequency array reconstructed from center frequency, bandwidth, and PSD shape
-- PSD data decompressed batch-wise with progress updates
-- Activity log built by counting carriers/interferers at each timestamp
-
-**Metadata Reconstruction**:
-- Duration and interval calculated from timestamps
-- RBW/VBW extracted from first record
-- Carrier/interferer counts determined from unique names across all records
-- Transponder bandwidth inferred from first transponder
-
-**Limitations**:
-- Cannot distinguish static vs dynamic carriers from JSON (both counted as "static")
-- Transponder bandwidth uses default 36 MHz if no transponders present
-- Some metadata fields are approximated (sample_rate_hz, fft_size)
-
-#### Use Cases
-
-1. **Quick Visualization**: Regenerate plots without re-running 24-hour simulation
-2. **Different Plot Styles**: Experiment with different visualization parameters
-3. **Animation Formats**: Generate both GIF and MP4 from same data
-4. **Decimated Animations**: Create faster previews with frame decimation
-5. **Custom Output Locations**: Save plots to different directories for comparison
-6. **Batch Processing**: Process multiple JSON files with different settings
-
-#### Performance
-
-- **Loading**: ~2-5 seconds for 289 records (~10 MB JSON file)
-- **Decompression**: ~1-2 seconds for all PSD arrays
-- **Static Plots**: ~10-15 seconds for 4 PNG plots
-- **Animation (no decimation)**: ~30-60 seconds for 289 frames
-- **Animation (10× decimation)**: ~5-10 seconds for 29 frames
-
-**Memory Usage**: ~500 MB for 24-hour simulation with 5-minute intervals
-
-## Test Suite and Quality Assurance
-
-**Location**: `tests/` directory
-
-The project has a comprehensive pytest-based test suite with 130 tests covering all aspects of the library.
-
-### Test Organization
-
-```
-tests/
-├── conftest.py                      # Shared fixtures and HTML report configuration
-├── test_beam.py                     # Beam class tests (14 tests)
-├── test_carrier.py                  # Carrier class tests (22 tests)
-├── test_enums.py                    # Enumeration tests (9 tests)
-├── test_iq.py                       # IQ generation tests (13 tests)
-├── test_metadata.py                 # Metadata class tests (8 tests)
-├── test_psd.py                      # PSD generation tests (12 tests)
-├── test_transponder.py              # Transponder class tests (12 tests)
-├── test_utils.py                    # Utility function tests (27 tests)
-├── test_noise_floor_comparison.py   # Noise floor validation tests (3 tests)
-└── test_psd_comparison.py           # PSD vs IQ-FFT comparison tests (5 tests)
-```
-
-### Running Tests
-
-**Basic test run**:
-```bash
-pytest
-```
-
-**With HTML report** (includes embedded plots):
-```bash
-pytest --html=tests-reports/test_report.html --self-contained-html
-```
-
-**Verbose output**:
-```bash
-pytest -v
-```
-
-**Run specific test file**:
-```bash
-pytest tests/test_carrier.py
-```
-
-**Run specific test**:
-```bash
-pytest tests/test_carrier.py::TestCarrierInstantiation::test_create_fdma_carrier
-```
-
-### Test Configuration
-
-**pytest.ini**:
-```ini
-[pytest]
-testpaths = tests
-python_files = test_*.py
-python_classes = Test*
-python_functions = test_*
-addopts = --strict-markers --tb=short
-```
-
-### HTML Test Reports
-
-**Configuration**: `tests/conftest.py` contains fixtures for HTML report generation with embedded plots.
-
-**Key Features**:
-- **Embedded plots**: Test plots are captured and embedded directly in HTML report
-- **Self-contained**: Single HTML file contains all images (base64 encoded)
-- **Metadata**: Includes Python version, platform, package versions
-- **Test grouping**: Organized by test class with collapsible sections
-
-**Fixtures**:
-- `plots_dir`: Returns Path to `tests-reports/plots/` directory, creates if needed
-- `attach_plot`: Function to attach plot images to HTML report (no-op when HTML report not requested)
-- `random_seed`: Provides consistent seed (42) for reproducible tests
-
-**Usage in Tests**:
+**Validation Pattern**:
 ```python
-def test_something(self, transponder, plots_dir, attach_plot):
-    # Generate data
-    freq, psd, _ = generate_psd(transponder, rbw_hz=50e3, vbw_hz=5e3)
-
-    # Create plot if HTML report requested
-    if plots_dir is not None:
-        fig, ax = plt.subplots()
-        ax.plot(freq, psd)
-        plot_path = plots_dir / 'test_something.png'
-        fig.savefig(plot_path)
-        plt.close(fig)
-        attach_plot(plot_path)  # Attach to HTML report
-
-    # Assertions
-    assert condition
+@attrs.define
+class Transponder:
+    @field.validator
+    def _validate(self, attribute, value):
+        validate_positive(value, "field_name")
 ```
 
-**Output Location**: `tests-reports/` (at project root level)
+**Parameter Naming**: `_hz`, `_sps`, `_db`, `_s`, `_watts`, `_watts_per_hz`
 
-### Test Coverage Areas
+## Key Equations
 
-**1. Object Validation Tests** (`test_carrier.py`, `test_transponder.py`, `test_beam.py`):
-- Parameter validation (positive values, ranges)
-- STATIC_CW vs modulated carrier requirements
-- TDMA vs FDMA parameter validation
-- Carrier overlap detection and validation
-- Transponder bandwidth constraints
+```
+Carrier Power: P = N₀ × BW × 10^(C/N_dB / 10)
+RRC Bandwidth: BW = SR × (1 + rolloff)
+TDMA Timing: Frame_Period = Burst_Time / Duty_Cycle
+VBW Noise: Noise_StdDev = Base × √(VBW / RBW)
+PSD Normalization: PSD(f) = (P/SR) × |H_RRC(f)|²
+```
 
-**2. Signal Generation Tests** (`test_psd.py`, `test_iq.py`):
-- PSD generation with various RBW/VBW settings
-- IQ generation with different sample rates
-- TDMA bursting behavior
-- STATIC_CW rendering (impulse in PSD, constant tone in IQ)
-- Multi-carrier and multi-transponder scenarios
+## Dependencies
 
-**3. Comparison Tests** (`test_psd_comparison.py`, `test_noise_floor_comparison.py`):
-- **Critical validation**: These tests verify that PSD generation (frequency domain) matches IQ→FFT (time domain)
-- Noise floor shape and power matching
-- Carrier peak levels across methods
-- Integrated power consistency
-- Different sample rate validation
+- **numpy ≥ 1.20.0**: Numerical operations
+- **scipy ≥ 1.7.0**: Signal processing
+- **attrs ≥ 21.0.0**: Class definitions with validation
+- **matplotlib ≥ 3.3.0**: Plotting
+- **imageio[ffmpeg] ≥ 2.9.0**: Animated GIF/MP4 export
+- **blosc2 ≥ 2.0.0**: PSD compression for JSON export
 
-**4. Utility Function Tests** (`test_utils.py`):
-- RRC filter generation (time and frequency domain)
-- Constellation generation for all modulation types
-- Power conversion (Watts ↔ dBm)
-- Measurement noise addition
-- Validation helper functions
-
-### Important Test Fixtures
-
-**conftest.py shared fixtures**:
+## Parameter Recommendations
 
 ```python
-@pytest.fixture
-def simple_transponder():
-    """36 MHz transponder at 12.5 GHz with no carriers."""
-    return Transponder(
-        center_frequency_hz=12.5e9,
-        bandwidth_hz=36e6,
-        noise_power_density_watts_per_hz=1e-15,
-        name="Test Transponder"
-    )
+# Transponder
+bandwidth_hz = 36e6                          # 36 MHz (typical Ku-band)
+noise_power_density_watts_per_hz = 1e-15     # -120 dBm/Hz
 
-@pytest.fixture
-def simple_fdma_carrier():
-    """10 Msps QPSK carrier at 0 MHz offset with 0.35 rolloff."""
-    return Carrier(
-        frequency_offset_hz=0.0,
-        cn_db=15.0,
-        symbol_rate_sps=10e6,
-        modulation=ModulationType.QPSK,
-        carrier_type=CarrierType.FDMA,
-        rrc_rolloff=0.35,
-        name="Test FDMA Carrier"
-    )
+# Carrier
+cn_db = 10.0 to 25.0                         # Typical range
+symbol_rate_sps = 1e6 to 30e6                # 1-30 Msps
+rrc_rolloff = 0.20 to 0.35                   # Standard values
 
-@pytest.fixture
-def transponder_with_carriers(simple_transponder, simple_fdma_carrier):
-    """Transponder with 2 non-overlapping FDMA carriers."""
-    # Carrier 1: 0 MHz with 13.5 MHz BW → [-6.75, +6.75] MHz
-    simple_transponder.add_carrier(simple_fdma_carrier)
+# PSD Generation
+rbw_hz = 10e3                                # 10 kHz
+vbw_hz = rbw_hz / 10                         # 10:1 ratio
 
-    # Carrier 2: -12 MHz with 6.75 MHz BW → [-15.375, -8.625] MHz
-    # Gap: 1.875 MHz clearance between carriers
-    carrier2 = Carrier(
-        frequency_offset_hz=-12e6,
-        cn_db=12.0,
-        symbol_rate_sps=5e6,
-        modulation=ModulationType.BPSK,
-        carrier_type=CarrierType.FDMA,
-        name="Carrier 2"
-    )
-    simple_transponder.add_carrier(carrier2)
-
-    return simple_transponder
+# IQ Generation
+duration_s = 0.001 to 0.01                   # 1-10 ms
+sample_rate_hz = None                        # Use default 1.25×, or specify custom
 ```
 
-**Key Design Note**: The `transponder_with_carriers` fixture carefully positions carriers to avoid overlap. This was a major source of test failures that was fixed by calculating proper spacing based on carrier bandwidths and RRC rolloff factors.
+## Critical Gotchas
 
-### Common Test Patterns
-
-**1. Basic Smoke Tests**:
-```python
-def test_create_object(self):
-    """Verify object can be instantiated with valid parameters."""
-    obj = SomeClass(param1=value1, param2=value2)
-    assert obj is not None
-```
-
-**2. Validation Tests**:
-```python
-def test_rejects_invalid_parameter(self):
-    """Verify validation raises appropriate error."""
-    with pytest.raises(ValueError, match="descriptive error pattern"):
-        SomeClass(param=invalid_value)
-```
-
-**3. Property Tests**:
-```python
-def test_calculated_property(self):
-    """Verify computed property returns expected value."""
-    obj = SomeClass(input_param=value)
-    assert obj.computed_property == expected_value
-```
-
-**4. Comparison Tests with Plots**:
-```python
-def test_methods_match(self, fixture, plots_dir, attach_plot):
-    """Verify two methods produce consistent results."""
-    result1 = method1(fixture)
-    result2 = method2(fixture)
-
-    # Generate comparison plot if HTML report requested
-    if plots_dir is not None:
-        fig, axes = plt.subplots(2, 1)
-        axes[0].plot(result1, label='Method 1')
-        axes[0].plot(result2, label='Method 2')
-        axes[1].plot(result1 - result2, label='Difference')
-        plot_path = plots_dir / 'comparison.png'
-        fig.savefig(plot_path)
-        plt.close(fig)
-        attach_plot(plot_path)
-
-    # Quantitative assertions
-    assert np.allclose(result1, result2, rtol=0.1)
-```
-
-### Test Evolution and Fixes
-
-**Major Test Issues Fixed (January 2025)**:
-
-1. **Carrier Overlap in Fixtures** (28 failures):
-   - **Problem**: `transponder_with_carriers` fixture had overlapping carriers
-   - **Root Cause**: carrier2 at -10 MHz with 10.8 MHz BW overlapped with simple_fdma_carrier at 0 MHz with 13.5 MHz BW
-   - **Fix**: Repositioned carrier2 to -12 MHz with 5 Msps (6.75 MHz BW) for 1.875 MHz clearance
-   - **Location**: `tests/conftest.py` lines 80-91
-
-2. **STATIC_CW IQ Generation** (multiple failures):
-   - **Problem**: `generate_iq()` crashed on STATIC_CW carriers (no symbol_rate_sps)
-   - **Root Cause**: Code attempted to divide by `None` when calculating samples per symbol
-   - **Fix**: Added special handling to generate constant amplitude tone for STATIC_CW before symbol rate calculations
-   - **Location**: `satellite_downlink_simulator/simulation/iq.py` lines 181-189
-
-3. **Data Type Assertions** (2 failures):
-   - **Problem**: Tests expected `np.complex128` but IQ generation returns `np.complex64`
-   - **Fix**: Updated assertions to match actual implementation
-   - **Location**: `tests/test_iq.py` lines 23, 34
-
-4. **Measurement Noise Test** (1 failure):
-   - **Problem**: Test used `np.allclose()` which was too lenient to detect small noise variations
-   - **Root Cause**: Default tolerances considered ±12% variations as "close enough"
-   - **Fix**: Changed to `np.array_equal()` for strict comparison, added random seed for reproducibility
-   - **Location**: `tests/test_utils.py` lines 188-197
-
-5. **String Representation Formats** (2 failures):
-   - **Problem**: Tests expected "2 transponders" but actual format is "2 transponder(s)"
-   - **Fix**: Updated assertions to match actual string formatting
-   - **Locations**: `tests/test_beam.py` line 100, `tests/test_transponder.py` line 220
-
-6. **Deprecation Warnings** (6 warnings):
-   - **Problem**: `np.trapz` deprecated in NumPy 2.0 in favor of `np.trapezoid`
-   - **Fix**: Replaced all 6 occurrences across test files
-   - **Locations**: `tests/test_noise_floor_comparison.py` (4×), `tests/test_psd_comparison.py` (2×)
-
-**Current Status**: All 130 tests pass with zero warnings (as of January 2025).
-
-### Test Maintenance Guidelines
-
-**When adding new features**:
-1. Add corresponding tests in appropriate test file
-2. Follow existing test class organization (TestFeatureName)
-3. Use descriptive test names that explain what is being tested
-4. Add docstrings explaining the test purpose
-5. Use shared fixtures from `conftest.py` when possible
-
-**When tests fail**:
-1. Read the full error message and traceback
-2. Check if fixtures have correct non-overlapping carriers
-3. Verify parameter validation requirements (STATIC_CW vs modulated)
-4. Ensure data types match expectations (complex64, not complex128)
-5. Run individual test with `-v` flag for detailed output
-
-**When modifying existing code**:
-1. Run full test suite before committing: `pytest`
-2. Check for deprecation warnings
-3. Update affected tests if behavior intentionally changed
-4. Add new tests if new edge cases discovered
-5. Generate HTML report to visualize comparison tests
-
-### Continuous Integration Considerations
-
-**Test execution time**: ~16-17 seconds for full suite (130 tests)
-
-**Requirements for CI**:
-- Python 3.8+
-- All dependencies from `requirements.txt`
-- No display server needed (uses matplotlib Agg backend)
-- Sufficient memory for large array operations (~500 MB)
-
-**Recommended CI command**:
-```bash
-pytest --html=test_report.html --self-contained-html
-```
-
-This captures all test results with embedded plots for debugging CI failures.
+1. **Transponder Noise Density Required**: Carrier power needs transponder noise density
+2. **RBW Determines Points**: `num_points = span_hz / rbw_hz + 1` - small RBW → large arrays
+3. **Allow Overlap Flag**: Default rejects overlaps; set `allow_overlap=True` for interference
+4. **TDMA Validation**: TDMA carriers MUST have `burst_time_s` and `duty_cycle`; FDMA MUST NOT
+5. **Sample Rate**: Must be ≥ bandwidth_hz (Nyquist criterion enforced)
+6. **STATIC_CW**: Must NOT have `symbol_rate_sps`; modulated carriers MUST have it
 
 ## Git Workflow
 
-**IMPORTANT**: Do NOT commit to git without explicit user approval.
+**IMPORTANT**: Do NOT commit without explicit user approval.
 
-When working on this codebase, Claude should:
-- Make code changes as requested
-- Run tests and verify functionality
-- **STOP before committing** - wait for explicit user instruction to commit
-- Only run `git commit` and `git push` when the user explicitly says to do so
+Workflow:
+1. Make code changes as requested
+2. Run tests and verify functionality
+3. **STOP before committing** - wait for explicit user instruction
+4. Only run `git commit` and `git push` when user explicitly says so
 
-This allows the user to review changes and decide when commits should be made.
+## Evolution History
+
+1. **Carrier Power**: Changed from `power_watts` to `cn_db` for industry alignment
+2. **VBW Implementation**: Fixed from smoothing to noise variance control
+3. **Random Carrier Placement**: Added auto-generation with 20% edge margin
+4. **Configurable Sample Rate**: Added optional `sample_rate_hz` parameter with Nyquist validation
+5. **STATIC_CW Type**: Added for unmodulated CW tones
+6. **Code Restructuring**: Organized into objects/ and simulation/ subdirectories
+7. **JSON Export**: Added SpectrumRecord serialization with blosc2 compression
+8. **MODULATED Interferers** (October 2025): Added support for modulated interferers in RF Pattern of Life
+   - New interferer type: `InterfererType` enum with CW and MODULATED options
+   - MODULATED interferers use regular modulation (BPSK, QPSK, QAM16, APSK16)
+   - Always static frequency (no sweeping, unlike CW interferers)
+   - CLI arguments: `--interferers-long-modulated`, `--interferers-short-modulated`
+   - Visualization highlighting adapts to bandwidth (CW=5MHz min, MODULATED=actual BW)
+   - Updated `PSDSnapshot` dataclass to include `interferer_bandwidths_hz` field
+
+## Test Maintenance
+
+**When tests fail**:
+1. Check fixtures for carrier overlap (common issue)
+2. Verify STATIC_CW vs modulated parameter requirements
+3. Ensure data types match (complex64, not complex128)
+4. Use `-v` flag for detailed output
+
+**Major fixes (January 2025)**:
+- Carrier overlap in fixtures (repositioned for clearance)
+- STATIC_CW IQ generation (added special handling)
+- `np.trapz` → `np.trapezoid` (NumPy 2.0 deprecation)
 
 ## Contact and Maintenance
 
-This library was developed iteratively with the following key objectives:
-- Physical accuracy (matches real spectrum analyzer behavior)
-- Computational efficiency (PSD generation without IQ processing)
-- Ease of use (intuitive C/N-based power specification)
-- Flexibility (random carrier generation, multiple modulation types)
+Developed with focus on:
+- Physical accuracy (matches real spectrum analyzers)
+- Computational efficiency (PSD without IQ generation)
+- Ease of use (intuitive C/N specification)
+- Flexibility (random generation, multiple modulation types)
 
-When in doubt about implementation details, refer to the inline comments in the simulation code which contain detailed explanations of the physical modeling.
+Refer to inline code comments for detailed physical modeling explanations.

@@ -300,7 +300,7 @@ class Visualizer:
 
     def create_animated_spectrogram(self, fps: int = 15, figsize: Tuple[float, float] = (19.2, 10.8),
                                    frame_decimation: int = 1, output_format: str = 'gif',
-                                   interferer_data: Optional[List[List[float]]] = None):
+                                   interferer_data: Optional[List[List[Tuple[float, float]]]] = None):
         """Create animated GIF or MP4 showing PSD evolution over time.
 
         Creates an animated visualization with:
@@ -312,9 +312,10 @@ class Visualizer:
             figsize: Figure size in inches (width, height). Default (19.2, 10.8) = 1920x1080 at 100 DPI
             frame_decimation: Frame decimation factor. Use every Nth frame (default: 1, no decimation)
             output_format: Output format, either 'gif' or 'mp4' (default: 'gif')
-            interferer_data: Optional list of interferer frequencies (Hz) for each snapshot.
-                            Each entry is a list of frequencies where interferers are present.
-                            Example: [[12.2e9, 12.3e9], [12.2e9], ...]
+            interferer_data: Optional list of (frequency_hz, bandwidth_hz) tuples for each snapshot.
+                            Each entry is a list of tuples where interferers are present.
+                            CW interferers have narrow bandwidth (100 Hz), MODULATED have symbol_rate*(1+rolloff).
+                            Example: [[(12.2e9, 5e6), (12.3e9, 100)], [(12.2e9, 5e6)], ...]
         """
         # Validate output format
         output_format = output_format.lower()
@@ -375,14 +376,18 @@ class Visualizer:
 
                 # Overlay interferer spans if data provided
                 if interferer_data is not None and frame_idx < len(interferer_data):
-                    interferer_freqs = interferer_data[frame_idx]
-                    if interferer_freqs:
-                        # Calculate span width: make CW interferers visible (0.5% of bandwidth or 5 MHz minimum)
-                        total_bandwidth_ghz = self.frequency_ghz[-1] - self.frequency_ghz[0]
-                        span_width_ghz = max(0.005, total_bandwidth_ghz * 0.005)  # 5 MHz or 0.5% of BW
+                    interferer_info = interferer_data[frame_idx]  # List of (freq_hz, bandwidth_hz) tuples
+                    if interferer_info:
+                        # Minimum span width for visibility: 5 MHz
+                        min_span_width_ghz = 0.005
 
-                        for interferer_freq_hz in interferer_freqs:
+                        for interferer_freq_hz, interferer_bw_hz in interferer_info:
                             interferer_freq_ghz = interferer_freq_hz / 1e9
+                            interferer_bw_ghz = interferer_bw_hz / 1e9
+
+                            # Use actual bandwidth, but ensure minimum visibility for CW (100 Hz bandwidth)
+                            span_width_ghz = max(interferer_bw_ghz, min_span_width_ghz)
+
                             # Draw translucent red span centered on interferer
                             ax_psd.axvspan(
                                 interferer_freq_ghz - span_width_ghz / 2,
@@ -440,12 +445,12 @@ class Visualizer:
         print(f"  Duration: {len(frames)/fps:.1f} seconds")
 
     def create_all_plots(self, activity_log: Optional[List] = None,
-                        interferer_data: Optional[List[List[float]]] = None):
+                        interferer_data: Optional[List[List[Tuple[float, float]]]] = None):
         """Create all standard plots.
 
         Args:
             activity_log: Activity log from simulation (optional)
-            interferer_data: Interferer frequency data for each snapshot (optional)
+            interferer_data: List of (frequency_hz, bandwidth_hz) tuples for each snapshot (optional)
         """
         print(f"\n{'='*60}")
         print(f"Creating all visualizations...")
